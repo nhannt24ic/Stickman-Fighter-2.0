@@ -3,10 +3,7 @@ package org.keyyh.stickmanfighter.server;
 import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
-import org.keyyh.stickmanfighter.common.data.CharacterState;
-import org.keyyh.stickmanfighter.common.data.GameStatePacket;
-import org.keyyh.stickmanfighter.common.data.InputPacket;
-import org.keyyh.stickmanfighter.common.data.Pose;
+import org.keyyh.stickmanfighter.common.data.*;
 import org.keyyh.stickmanfighter.common.network.KryoManager;
 import org.keyyh.stickmanfighter.server.game.StickmanCharacterServer;
 
@@ -18,12 +15,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class GameServer {
     private final int port = 9876;
     private DatagramSocket socket;
     private final Kryo kryo;
     private final Map<SocketAddress, StickmanCharacterServer> players = new ConcurrentHashMap<>();
+    private static final long PLAYER_TIMEOUT_MS = 10000;
 
     public GameServer() {
         this.kryo = new Kryo();
@@ -34,6 +35,8 @@ public class GameServer {
         System.out.println("Game Server starting on port " + port + "...");
         socket = new DatagramSocket(port);
         System.out.println("Game Server started successfully. Waiting for Kryo packets...");
+
+        startReaperThread();
 
         while (true) {
             try {
@@ -48,6 +51,26 @@ public class GameServer {
                     UUID newId = UUID.randomUUID();
                     StickmanCharacterServer newPlayer = new StickmanCharacterServer(newId, 100 + players.size() * 200, 450);
                     players.put(clientAddress, newPlayer);
+
+                    List<CharacterState> currentStates = new ArrayList<>();
+                    for (StickmanCharacterServer character : players.values()) {
+                        CharacterState state = new CharacterState(character.id, character.x, character.y, character.getCurrentPose(), character.isFacingRight);
+                        currentStates.add(state);
+                    }
+                    GameStatePacket initialGameState = new GameStatePacket(currentStates, System.currentTimeMillis());
+
+                    ConnectionResponsePacket responsePacket = new ConnectionResponsePacket(newId, initialGameState);
+
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    Output output = new Output(baos);
+                    kryo.writeClassAndObject(output, responsePacket);
+                    output.close();
+                    byte[] sendBuffer = baos.toByteArray();
+                    DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, clientAddress);
+                    socket.send(sendPacket);
+                    System.out.println("Sent ConnectionResponsePacket to " + clientAddress);
+
+                    continue;
                 }
 
                 ByteArrayInputStream bais = new ByteArrayInputStream(receivePacket.getData(), 0, receivePacket.getLength());
@@ -61,6 +84,7 @@ public class GameServer {
 
                     if (character != null) {
                         character.update(packet);
+                        character.lastUpdateTime = System.currentTimeMillis();
                     }
                 }
 
@@ -107,6 +131,23 @@ public class GameServer {
                 e.printStackTrace();
             }
         }
+    }
+
+    // Dùng import java.util.concurrent.*
+    private void startReaperThread() {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        // Lên lịch để chạy tác vụ sau mỗi 5 giây
+        scheduler.scheduleAtFixedRate(() -> {
+            long currentTime = System.currentTimeMillis();
+            System.out.println("[Reaper] Checking for timed-out players...");
+            players.entrySet().removeIf(entry -> {
+                boolean timedOut = currentTime - entry.getValue().lastUpdateTime > PLAYER_TIMEOUT_MS;
+                if (timedOut) {
+                    System.out.println("Player " + entry.getKey() + " timed out. Removing.");
+                }
+                return timedOut;
+            });
+        }, 5, 5, TimeUnit.SECONDS);
     }
 
     public static void main(String[] args) {

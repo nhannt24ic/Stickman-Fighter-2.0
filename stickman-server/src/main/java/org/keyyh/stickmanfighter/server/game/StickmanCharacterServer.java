@@ -2,6 +2,8 @@ package org.keyyh.stickmanfighter.server.game;
 
 import org.keyyh.stickmanfighter.common.data.InputPacket;
 import org.keyyh.stickmanfighter.common.data.Pose;
+import org.keyyh.stickmanfighter.common.game.AnimationData;
+import org.keyyh.stickmanfighter.common.game.GameConstants;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,65 +13,91 @@ public class StickmanCharacterServer {
     public final UUID id;
     public double x, y;
     public boolean isFacingRight;
-
-    private List<Pose> runRightKeyframes, runLeftKeyframes, jumpKeyframes;
-    private Pose currentPose;
-    private long lastFrameTime = 0;
-    private int currentRunFrame = -1;
-    private final int TIME_PER_RUN_FRAME_MAX = 20;
+    public long lastUpdateTime;
 
     private boolean isJumping = false;
-    private double jumpInitialSpeed = -15.0;
-    private double gravity = 1;
-    private double movingMaxSpeed = 9;
     private double currentVerticalSpeed = 0;
-    private final int groundLevel = 450;
+    private Pose currentPose;
+    private int currentFrame = -1;
+    private long lastFrameTime = 0;
+
+    private final List<Pose> runRightKeyframes;
+    private final List<Pose> runLeftKeyframes;
+    private final List<Pose> jumpKeyframes;
 
     public StickmanCharacterServer(UUID id, double startX, double startY) {
         this.id = id;
         this.x = startX;
         this.y = startY;
         this.isFacingRight = true;
+        this.lastUpdateTime = System.currentTimeMillis();
 
-        initializeRunRightKeyframes();
-        initializeRunLeftKeyframes();
-        //initializeJumpKeyframes(); // Sẽ làm sau
+        this.runRightKeyframes = AnimationData.createRunRightKeyframes();
+        this.jumpKeyframes = AnimationData.createJumpKeyframes();
+        this.runLeftKeyframes = new ArrayList<>();
+        for (Pose rightPose : runRightKeyframes) {
+            double torso = -Math.toDegrees(rightPose.torso); double neck = -Math.toDegrees(rightPose.neck);
+            double shoulderL = 180 - Math.toDegrees(rightPose.shoulderR); double shoulderR = 180 - Math.toDegrees(rightPose.shoulderL);
+            double hipL = 180 - Math.toDegrees(rightPose.hipR); double hipR = 180 - Math.toDegrees(rightPose.hipL);
+            double elbowL = -Math.toDegrees(rightPose.elbowR); double elbowR = -Math.toDegrees(rightPose.elbowL);
+            double kneeL = -Math.toDegrees(rightPose.kneeR); double kneeR = -Math.toDegrees(rightPose.kneeL);
+            runLeftKeyframes.add(new Pose(torso, neck, shoulderL, elbowL, shoulderR, elbowR, hipL, kneeL, hipR, kneeR));
+        }
         setToIdlePose();
     }
 
-    // --- HÀM UPDATE LOGIC CHÍNH CỦA SERVER ---
     public void update(InputPacket input) {
-        boolean wantMove = input.moveLeft || input.moveRight;
+        long currentTime = System.currentTimeMillis();
+        boolean isGrounded = (this.y >= GameConstants.GROUND_LEVEL);
 
-        // Xử lý di chuyển ngang
-        if (wantMove) {
+        if (input.jump && isGrounded && !this.isJumping) {
+            this.isJumping = true;
+            this.currentVerticalSpeed = GameConstants.JUMP_INITIAL_SPEED;
+            this.currentFrame = 0;
+            this.lastFrameTime = currentTime;
+        }
+
+        boolean wantMove = input.moveLeft || input.moveRight;
+        boolean allowMove = !isJumping;
+
+        if (allowMove) {
             if (input.moveLeft) {
-                this.x -= movingMaxSpeed;
+                this.x -= GameConstants.SPEED_X;
                 this.isFacingRight = false;
             }
             if (input.moveRight) {
-                this.x += movingMaxSpeed;
+                this.x += GameConstants.SPEED_X;
                 this.isFacingRight = true;
             }
         }
 
-        // Xử lý vật lý (trọng lực và va chạm đất đơn giản)
-        this.y += currentVerticalSpeed;
-        currentVerticalSpeed += gravity;
-        if (this.y > groundLevel) {
-            this.y = groundLevel;
-            currentVerticalSpeed = 0;
-            isJumping = false;
+        this.y += this.currentVerticalSpeed;
+        this.currentVerticalSpeed += GameConstants.GRAVITY;
+
+        if (this.y > GameConstants.GROUND_LEVEL) {
+            this.y = GameConstants.GROUND_LEVEL;
+            this.currentVerticalSpeed = 0;
+            if (this.isJumping) {
+
+                this.isJumping = false;
+                setToIdlePose();
+            }
         }
 
-        // --- XỬ LÝ ANIMATION ---
-        if (wantMove && !isJumping) { // Nếu đang muốn di chuyển và đang trên mặt đất
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - lastFrameTime > TIME_PER_RUN_FRAME_MAX) {
+        if (isJumping) {
+            if (currentTime - lastFrameTime >= GameConstants.TIME_PER_JUMP_FRAME) {
                 lastFrameTime = currentTime;
-                List<Pose> currentAnimation = isFacingRight ? runRightKeyframes : runLeftKeyframes;
-                currentRunFrame = (currentRunFrame + 1) % currentAnimation.size();
-                this.currentPose = currentAnimation.get(currentRunFrame);
+                if (currentFrame < jumpKeyframes.size()) {
+                    this.currentPose = jumpKeyframes.get(currentFrame);
+                    currentFrame++;
+                }
+            }
+        } else if (wantMove) {
+            if (currentTime - lastFrameTime > GameConstants.TIME_PER_RUN_FRAME) {
+                lastFrameTime = currentTime;
+                List<Pose> anim = isFacingRight ? runRightKeyframes : runLeftKeyframes;
+                currentFrame = (currentFrame + 1) % anim.size();
+                this.currentPose = anim.get(currentFrame);
             }
         } else {
             setToIdlePose();
@@ -80,41 +108,8 @@ public class StickmanCharacterServer {
         return this.currentPose;
     }
 
-    // --- CÁC HÀM KHỞI TẠO ANIMATION (SAO CHÉP TỪ CLIENT) ---
-    private void applyPose(Pose pose) {
-        this.currentPose = pose;
-    }
-
     private void setToIdlePose() {
-        // Tư thế nghỉ đơn giản, bạn có thể copy tư thế nghỉ đầy đủ từ client
-        this.currentPose = new Pose(0,0,125,-10,55,10,115,-5,65,5);
-    }
-
-    private void initializeRunLeftKeyframes(){
-        runLeftKeyframes = new ArrayList<>();
-        for (Pose rightPose : runRightKeyframes) {
-            double torso = -Math.toDegrees(rightPose.torso);
-            double neck = -Math.toDegrees(rightPose.neck);
-            double shoulderL = 180 - Math.toDegrees(rightPose.shoulderR);
-            double shoulderR = 180 - Math.toDegrees(rightPose.shoulderL);
-            double hipL = 180 - Math.toDegrees(rightPose.hipR);
-            double hipR = 180 - Math.toDegrees(rightPose.hipL);
-            double elbowL = -Math.toDegrees(rightPose.elbowR);
-            double elbowR = -Math.toDegrees(rightPose.elbowL);
-            double kneeL = -Math.toDegrees(rightPose.kneeR);
-            double kneeR = -Math.toDegrees(rightPose.kneeL);
-            runLeftKeyframes.add(new Pose(torso, neck, shoulderL, elbowL, shoulderR, elbowR, hipL, kneeL, hipR, kneeR));
-        }
-    }
-
-    private void initializeRunRightKeyframes() {
-        runRightKeyframes = new ArrayList<>();
-        runRightKeyframes.add(new Pose(50, 0,  175 - 50 , -20, 40 - 40-10 , -110, 135, 10, 20, 80));
-        runRightKeyframes.add(new Pose(50, 0,  125 -10, -40, 30-10, -110, 125, 20, 35, 90));
-        runRightKeyframes.add(new Pose(50, 0,  115-10, -90, 70-10, -110,   100, 40,   50, 70));
-        runRightKeyframes.add(new Pose(50, 0,  100-10, -110, 100-10, -110,   70, 50,   70, 50));
-        runRightKeyframes.add(new Pose(50, 0,  70-10, -110, 115-10, -90,   50, 70,   100, 40));
-        runRightKeyframes.add(new Pose(50, 0,  30-10, -110, 125-10, -40,   35, 90,   125, 20));
-        runRightKeyframes.add(new Pose(50, 0,  0-10, -110, 135-10, -20, 20, 80, 135, 10));
+        this.currentPose = new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5);
+        this.currentFrame = -1;
     }
 }

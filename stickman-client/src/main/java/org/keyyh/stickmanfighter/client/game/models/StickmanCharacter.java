@@ -1,11 +1,12 @@
 package org.keyyh.stickmanfighter.client.game.models;
 
+import org.keyyh.stickmanfighter.client.gui.GameScreen;
 import org.keyyh.stickmanfighter.common.data.CharacterState;
 import org.keyyh.stickmanfighter.common.data.Pose;
+import org.keyyh.stickmanfighter.common.game.AnimationData;
+import org.keyyh.stickmanfighter.common.game.GameConstants;
 
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.BasicStroke;
+import java.awt.*;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,12 +17,17 @@ public class StickmanCharacter {
     private final boolean isAI;
     public double rootX, rootY;
     private Color characterColor;
-    // private boolean isFacingRight;
+    private boolean isFacingRight;
 
-    private double startX, startY;
-    private double targetX, targetY;
+    // Trạng thái dự đoán
+    private boolean isJumping = false;
+    private double currentVerticalSpeed = 0;
+
+    // Trạng thái nội suy
+    private double startX, startY, targetX, targetY;
     private long startTime, targetTime;
 
+    // Dữ liệu hiển thị
     private float lineWidth = 6f;
     private final double headRadius = 17;
     private final double torsoLength = 60;
@@ -34,45 +40,84 @@ public class StickmanCharacter {
 
     private Point2D.Double hip, neck, headCenter, shoulderL, elbowL, wristL, shoulderR, elbowR, wristR, kneeL, footL, kneeR, footR;
     private double torsoAngle, neckAngle, shoulderLAngle, elbowLAngle, shoulderRAngle, elbowRAngle, hipLAngle, kneeLAngle, hipRAngle, kneeRAngle;
+
     private List<Pose> runRightKeyframes, runLeftKeyframes, jumpKeyframes;
 
     public StickmanCharacter(UUID id, double rootX, double rootY, Color characterColor, boolean isAI) {
         this.id = id;
+        this.isAI = isAI;
         this.rootX = rootX;
         this.rootY = rootY;
         this.characterColor = characterColor;
-        this.isAI = isAI;
-
         this.startX = this.targetX = rootX;
         this.startY = this.targetY = rootY;
         this.startTime = this.targetTime = System.currentTimeMillis();
-
         hip = new Point2D.Double(); neck = new Point2D.Double(); headCenter = new Point2D.Double();
         shoulderL = new Point2D.Double(); elbowL = new Point2D.Double(); wristL = new Point2D.Double();
         shoulderR = new Point2D.Double(); elbowR = new Point2D.Double(); wristR = new Point2D.Double();
         kneeL = new Point2D.Double(); footL = new Point2D.Double();
         kneeR = new Point2D.Double(); footR = new Point2D.Double();
-
-        initializeRunRightKeyframes();
-        initializeRunLeftKeyframes();
-        initializeJumpKeyframes();
+        this.runRightKeyframes = AnimationData.createRunRightKeyframes();
+        this.jumpKeyframes = AnimationData.createJumpKeyframes();
+        this.runLeftKeyframes = new ArrayList<>();
+        for (Pose rightPose : runRightKeyframes) {
+            double torso = -Math.toDegrees(rightPose.torso); double neck = -Math.toDegrees(rightPose.neck);
+            double shoulderL = 180 - Math.toDegrees(rightPose.shoulderR); double shoulderR = 180 - Math.toDegrees(rightPose.shoulderL);
+            double hipL = 180 - Math.toDegrees(rightPose.hipR); double hipR = 180 - Math.toDegrees(rightPose.hipL);
+            double elbowL = -Math.toDegrees(rightPose.elbowR); double elbowR = -Math.toDegrees(rightPose.elbowL);
+            double kneeL = -Math.toDegrees(rightPose.kneeR); double kneeR = -Math.toDegrees(rightPose.kneeL);
+            runLeftKeyframes.add(new Pose(torso, neck, shoulderL, elbowL, shoulderR, elbowR, hipL, kneeL, hipR, kneeR));
+        }
         setToIdlePose();
         updatePointsFromAngles();
     }
 
+    public void updateLocalPlayer(GameScreen.InputHandler inputHandler) {
+        boolean isGrounded = (this.rootY >= GameConstants.GROUND_LEVEL);
+        if (inputHandler.isJumpPressed() && isGrounded && !this.isJumping) {
+            this.isJumping = true;
+            this.currentVerticalSpeed = GameConstants.JUMP_INITIAL_SPEED;
+        }
+        boolean wantMove = inputHandler.isMoveLeft() || inputHandler.isMoveRight();
+        if (wantMove) {
+            if (inputHandler.isMoveLeft()) {
+                this.rootX -= GameConstants.SPEED_X;
+                this.isFacingRight = false;
+            }
+            if (inputHandler.isMoveRight()) {
+                this.rootX += GameConstants.SPEED_X;
+                this.isFacingRight = true;
+            }
+        }
+        this.rootY += this.currentVerticalSpeed;
+        this.currentVerticalSpeed += GameConstants.GRAVITY;
+        if (this.rootY > GameConstants.GROUND_LEVEL) {
+            this.rootY = GameConstants.GROUND_LEVEL;
+            this.currentVerticalSpeed = 0;
+            this.isJumping = false;
+        }
+        updatePointsFromAngles();
+    }
+
+    public void reconcile(CharacterState serverState) {
+        this.rootX = serverState.x;
+        this.rootY = serverState.y;
+        this.isFacingRight = serverState.isFacingRight;
+        if (serverState.currentPose != null) {
+            applyPose(serverState.currentPose);
+        } else {
+            setToIdlePose();
+        }
+        updatePointsFromAngles();
+    }
+
     public void addState(CharacterState newState, long packetTimestamp) {
-        // Di chuyển trạng thái "đích" hiện tại thành trạng thái "bắt đầu"
         this.startX = this.targetX;
         this.startY = this.targetY;
         this.startTime = this.targetTime;
-
-        // Đặt trạng thái mới làm "đích"
         this.targetX = newState.x;
         this.targetY = newState.y;
         this.targetTime = packetTimestamp;
-
-        // Cập nhật các trạng thái khác không cần nội suy
-        // this.isFacingRight = newState.isFacingRight;
         if (newState.currentPose != null) {
             applyPose(newState.currentPose);
         } else {
@@ -82,77 +127,28 @@ public class StickmanCharacter {
 
     public void interpolate(long renderTime) {
         if (targetTime == startTime) {
-            // Nếu chỉ có một điểm dữ liệu, không nội suy
+            updatePointsFromAngles();
             return;
         }
-
-        // Tính toán hệ số nội suy 't' (một giá trị từ 0.0 đến 1.0)
         float t = (float)(renderTime - startTime) / (float)(targetTime - startTime);
-        t = Math.max(0.0f, Math.min(t, 1.0f)); // Giới hạn t trong khoảng [0, 1]
-
-        // Áp dụng công thức nội suy tuyến tính (Lerp) cho vị trí
+        t = Math.max(0.0f, Math.min(t, 1.0f));
         this.rootX = startX + (targetX - startX) * t;
         this.rootY = startY + (targetY - startY) * t;
-
         updatePointsFromAngles();
     }
 
     public UUID getId() { return id; }
 
-    private void initializeRunLeftKeyframes(){
-        runLeftKeyframes = new ArrayList<>();
-        for (Pose rightPose : runRightKeyframes) {
-            double torso = -Math.toDegrees(rightPose.torso);
-            double neck = -Math.toDegrees(rightPose.neck);
-            double shoulderL = 180 - Math.toDegrees(rightPose.shoulderR);
-            double shoulderR = 180 - Math.toDegrees(rightPose.shoulderL);
-            double hipL = 180 - Math.toDegrees(rightPose.hipR);
-            double hipR = 180 - Math.toDegrees(rightPose.hipL);
-            double elbowL = -Math.toDegrees(rightPose.elbowR);
-            double elbowR = -Math.toDegrees(rightPose.elbowL);
-            double kneeL = -Math.toDegrees(rightPose.kneeR);
-            double kneeR = -Math.toDegrees(rightPose.kneeL);
-            runLeftKeyframes.add(new Pose(torso, neck, shoulderL, elbowL, shoulderR, elbowR, hipL, kneeL, hipR, kneeR));
-        }
-    }
-
-    private void initializeRunRightKeyframes() {
-        runRightKeyframes = new ArrayList<>();
-        runRightKeyframes.add(new Pose(50, 0,  175 - 50 , -20, 40 - 40-10 , -110, 135, 10, 20, 80));
-        runRightKeyframes.add(new Pose(50, 0,  125 -10, -40, 30-10, -110, 125, 20, 35, 90));
-        runRightKeyframes.add(new Pose(50, 0,  115-10, -90, 70-10, -110,   100, 40,   50, 70));
-        runRightKeyframes.add(new Pose(50, 0,  100-10, -110, 100-10, -110,   70, 50,   70, 50));
-        runRightKeyframes.add(new Pose(50, 0,  70-10, -110, 115-10, -90,   50, 70,   100, 40));
-        runRightKeyframes.add(new Pose(50, 0,  30-10, -110, 125-10, -40,   35, 90,   125, 20));
-        runRightKeyframes.add(new Pose(50, 0,  0-10, -110, 135-10, -20, 20, 80, 135, 10));
-    }
-
-    private void initializeJumpKeyframes() {
-        jumpKeyframes = new ArrayList<>();
-        jumpKeyframes.add(new Pose(0, 0, 190, -80, -10, 80, 160, -90, 20, 90));
-        jumpKeyframes.add(new Pose(0, 0, 200, -30, -20, 30, 210, -140, -30, 140));
-        jumpKeyframes.add(new Pose(0, 0, 200, -50, -20, 50, 200, -120, -20, 120));
-        jumpKeyframes.add(new Pose(0, 0, 170, -40, 10, 40, 160, -90, 20, 90));
-        jumpKeyframes.add(new Pose(0, 0, 150, -50, 30, 50, 160, -60, 20, 60));
-        jumpKeyframes.add(new Pose(0, 0, 135, -30, 45, 30, 130, -30, 50, 30));
-        jumpKeyframes.add(new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5));
-    }
-
     public void applyPose(Pose pose) {
-        this.torsoAngle = pose.torso;
-        this.neckAngle = pose.neck;
-        this.shoulderLAngle = pose.shoulderL;
-        this.elbowLAngle = pose.elbowL;
-        this.shoulderRAngle = pose.shoulderR;
-        this.elbowRAngle = pose.elbowR;
-        this.hipLAngle = pose.hipL;
-        this.kneeLAngle = pose.kneeL;
-        this.hipRAngle = pose.hipR;
-        this.kneeRAngle = pose.kneeR;
+        this.torsoAngle = pose.torso; this.neckAngle = pose.neck;
+        this.shoulderLAngle = pose.shoulderL; this.elbowLAngle = pose.elbowL;
+        this.shoulderRAngle = pose.shoulderR; this.elbowRAngle = pose.elbowR;
+        this.hipLAngle = pose.hipL; this.kneeLAngle = pose.kneeL;
+        this.hipRAngle = pose.hipR; this.kneeRAngle = pose.kneeR;
     }
 
     public void setToIdlePose() {
-
+        applyPose(new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5));
     }
 
     private void updatePointsFromAngles() {
@@ -196,4 +192,16 @@ public class StickmanCharacter {
     }
 
     public boolean isAI() { return isAI; }
+
+    public Point2D.Double getHeadCenter() {
+        return this.headCenter;
+    }
+
+    public double getHeadRadius() {
+        return this.headRadius;
+    }
+
+    public boolean isFacingRight() {
+        return this.isFacingRight;
+    }
 }

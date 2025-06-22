@@ -4,6 +4,7 @@ import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import org.keyyh.stickmanfighter.client.game.models.StickmanCharacter;
+import org.keyyh.stickmanfighter.common.data.ConnectionResponsePacket;
 import org.keyyh.stickmanfighter.common.data.GameStatePacket;
 import org.keyyh.stickmanfighter.common.data.InputPacket;
 import org.keyyh.stickmanfighter.common.network.KryoManager;
@@ -11,6 +12,7 @@ import org.keyyh.stickmanfighter.common.network.KryoManager;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.geom.Point2D;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.*;
@@ -31,6 +33,8 @@ public class GameScreen extends JPanel implements ActionListener {
     private final Map<UUID, StickmanCharacter> characters = new ConcurrentHashMap<>();
     private InputHandler inputHandler;
     private Timer gameLoopTimer;
+    private UUID myPlayerId;
+    private long clockOffset = 0;
 
     public GameScreen(int width, int height) {
         this.screenWidth = width;
@@ -66,15 +70,18 @@ public class GameScreen extends JPanel implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent e) {
-        // Gửi input của người chơi đi
         sendInputToServer();
 
-        // <<< THAY ĐỔI: Thực hiện nội suy cho tất cả nhân vật
-        long renderTime = System.currentTimeMillis() - 100; // Render trễ 100ms
-        for (StickmanCharacter character : characters.values()) {
-            character.interpolate(renderTime);
-        }
+        long synchronizedServerTime = System.currentTimeMillis() - clockOffset;
+        long renderTime = synchronizedServerTime - 100;
 
+        for (StickmanCharacter character : characters.values()) {
+            if (isMyPlayer(character.getId())) {
+                character.updateLocalPlayer(inputHandler);
+            } else {
+                character.interpolate(renderTime);
+            }
+        }
         repaint();
     }
 
@@ -90,11 +97,17 @@ public class GameScreen extends JPanel implements ActionListener {
                     Object receivedObject = kryo.readClassAndObject(input);
                     input.close();
 
-                    if (receivedObject instanceof GameStatePacket) {
+                    if (receivedObject instanceof ConnectionResponsePacket) {
+                        ConnectionResponsePacket response = (ConnectionResponsePacket) receivedObject;
+                        this.myPlayerId = response.yourPlayerId;
+                        long clientTime = System.currentTimeMillis();
+                        this.clockOffset = clientTime - response.initialGameState.timestamp;
+                        updateCharactersFromServer(response.initialGameState);
+                    } else if (receivedObject instanceof GameStatePacket) {
                         updateCharactersFromServer((GameStatePacket) receivedObject);
                     }
                 } catch (Exception e) {
-                    // ignore
+                    // Ignore
                 }
             }
         });
@@ -103,19 +116,23 @@ public class GameScreen extends JPanel implements ActionListener {
     }
 
     private void updateCharactersFromServer(GameStatePacket packet) {
+        if (packet == null || packet.players == null) return;
+
         SwingUtilities.invokeLater(() -> {
             Set<UUID> receivedIds = new HashSet<>();
-            if (packet.players == null) return;
-
             for (var state : packet.players) {
                 receivedIds.add(state.id);
                 StickmanCharacter character = characters.get(state.id);
                 if (character == null) {
-                    character = new StickmanCharacter(state.id, state.x, state.y, Color.BLUE, false);
+                    character = new StickmanCharacter(state.id, state.x, state.y, Color.BLACK, false);
                     characters.put(state.id, character);
                 }
-                // <<< THAY ĐỔI: Gọi hàm addState mới
-                character.addState(state, packet.timestamp);
+
+                if (isMyPlayer(state.id)) {
+                    character.reconcile(state);
+                } else {
+                    character.addState(state, packet.timestamp);
+                }
             }
             characters.keySet().removeIf(id -> !receivedIds.contains(id));
         });
@@ -137,6 +154,10 @@ public class GameScreen extends JPanel implements ActionListener {
         }
     }
 
+    private boolean isMyPlayer(UUID characterId) {
+        return myPlayerId != null && myPlayerId.equals(characterId);
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -144,10 +165,38 @@ public class GameScreen extends JPanel implements ActionListener {
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         for (StickmanCharacter c : characters.values()) {
             c.draw(g2d);
+
+            if (isMyPlayer(c.getId())) {
+                Point2D.Double headCenter = c.getHeadCenter();
+                boolean facingRight = c.isFacingRight();
+
+                if (headCenter != null) {
+                    final int ARROW_CENTER_Y = (int) headCenter.y - 32;
+                    final int ARROW_CENTER_X = (int) headCenter.x;
+                    final int BASE_HALF = 7;
+                    final int TOP_HALF = 12;
+                    final int BOTTOM_HALF = 6;
+
+                    int[] xPoints = new int[3];
+                    int[] yPoints = new int[3];
+
+                    if (facingRight) {
+                        xPoints[0] = ARROW_CENTER_X + TOP_HALF; yPoints[0] = ARROW_CENTER_Y;
+                        xPoints[1] = ARROW_CENTER_X - BOTTOM_HALF ; yPoints[1] = ARROW_CENTER_Y - BASE_HALF;
+                        xPoints[2] = ARROW_CENTER_X - BOTTOM_HALF ; yPoints[2] = ARROW_CENTER_Y + BASE_HALF;
+                    } else {
+                        xPoints[0] = ARROW_CENTER_X - TOP_HALF; yPoints[0] = ARROW_CENTER_Y;
+                        xPoints[1] = ARROW_CENTER_X + BOTTOM_HALF ; yPoints[1] = ARROW_CENTER_Y - BASE_HALF;
+                        xPoints[2] = ARROW_CENTER_X + BOTTOM_HALF ; yPoints[2] = ARROW_CENTER_Y + BASE_HALF;
+                    }
+
+                    g2d.setColor(Color.GREEN);
+                    g2d.fillPolygon(xPoints, yPoints, 3);
+                }
+            }
         }
     }
 
-    // Lớp InputHandler giữ nguyên
     public static class InputHandler extends KeyAdapter {
         private boolean moveLeft = false;
         private boolean moveRight = false;
