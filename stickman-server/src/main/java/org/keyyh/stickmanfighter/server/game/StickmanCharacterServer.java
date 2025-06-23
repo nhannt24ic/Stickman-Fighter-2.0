@@ -2,9 +2,17 @@ package org.keyyh.stickmanfighter.server.game;
 
 import org.keyyh.stickmanfighter.common.data.InputPacket;
 import org.keyyh.stickmanfighter.common.data.Pose;
+import org.keyyh.stickmanfighter.common.enums.ActionModifier;
+import org.keyyh.stickmanfighter.common.enums.CharacterFSMState;
+import org.keyyh.stickmanfighter.common.enums.PlayerAction;
 import org.keyyh.stickmanfighter.common.game.AnimationData;
 import org.keyyh.stickmanfighter.common.game.GameConstants;
+import org.keyyh.stickmanfighter.common.game.Skeleton;
 
+import java.awt.*;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Area;
+import java.awt.geom.Ellipse2D;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -14,16 +22,21 @@ public class StickmanCharacterServer {
     public double x, y;
     public boolean isFacingRight;
     public long lastUpdateTime;
+    public CharacterFSMState fsmState;
 
-    private boolean isJumping = false;
+    private final Skeleton skeleton = new Skeleton();
     private double currentVerticalSpeed = 0;
     private Pose currentPose;
-    private int currentFrame = -1;
-    private long lastFrameTime = 0;
+    private int currentFrame;
+    private long actionStartTime;
+    private long lastFrameTime;
 
-    private final List<Pose> runRightKeyframes;
-    private final List<Pose> runLeftKeyframes;
-    private final List<Pose> jumpKeyframes;
+    private final List<Pose> idleKeyframes, jumpKeyframes, crouchKeyframes;
+    private final List<Pose> runRightKeyframes, runLeftKeyframes;
+    private final List<Pose> punchRightKeyframes, punchLeftKeyframes;
+    private final List<Pose> kickRightKeyframes, kickLeftKeyframes;
+    private final List<Pose> blockRightKeyframes, blockLeftKeyframes;
+    private final List<Pose> dashRightKeyframes,  dashLeftKeyframes;
 
     public StickmanCharacterServer(UUID id, double startX, double startY) {
         this.id = id;
@@ -32,84 +45,249 @@ public class StickmanCharacterServer {
         this.isFacingRight = true;
         this.lastUpdateTime = System.currentTimeMillis();
 
-        this.runRightKeyframes = AnimationData.createRunRightKeyframes();
+        this.idleKeyframes = AnimationData.createIdleKeyframes();
         this.jumpKeyframes = AnimationData.createJumpKeyframes();
-        this.runLeftKeyframes = new ArrayList<>();
-        for (Pose rightPose : runRightKeyframes) {
-            double torso = -Math.toDegrees(rightPose.torso); double neck = -Math.toDegrees(rightPose.neck);
-            double shoulderL = 180 - Math.toDegrees(rightPose.shoulderR); double shoulderR = 180 - Math.toDegrees(rightPose.shoulderL);
-            double hipL = 180 - Math.toDegrees(rightPose.hipR); double hipR = 180 - Math.toDegrees(rightPose.hipL);
-            double elbowL = -Math.toDegrees(rightPose.elbowR); double elbowR = -Math.toDegrees(rightPose.elbowL);
-            double kneeL = -Math.toDegrees(rightPose.kneeR); double kneeR = -Math.toDegrees(rightPose.kneeL);
-            runLeftKeyframes.add(new Pose(torso, neck, shoulderL, elbowL, shoulderR, elbowR, hipL, kneeL, hipR, kneeR));
-        }
-        setToIdlePose();
+        this.crouchKeyframes = AnimationData.createCrouchKeyframes();
+
+        this.blockRightKeyframes = AnimationData.createBlockRightKeyframes();
+        this.blockLeftKeyframes = AnimationData.createBlockLeftKeyframes();
+
+        this.dashRightKeyframes = AnimationData.createDashRightKeyframes();
+        this.dashLeftKeyframes = AnimationData.createDashLeftKeyframes();
+
+        this.runRightKeyframes = AnimationData.createRunRightKeyframes();
+        this.runLeftKeyframes = AnimationData.createRunLeftKeyframes();
+
+        this.punchRightKeyframes = AnimationData.createPunchRightKeyframes();
+        this.punchLeftKeyframes = AnimationData.createPunchLeftKeyframes();
+
+        this.kickRightKeyframes = AnimationData.createKickRightKeyframes();
+        this.kickLeftKeyframes = AnimationData.createKickLeftKeyframes();
+
+        setToIdle();
     }
 
-    public void update(InputPacket input) {
-        long currentTime = System.currentTimeMillis();
-        boolean isGrounded = (this.y >= GameConstants.GROUND_LEVEL);
+    public void update(InputPacket input, long currentTime) {
+        updatePhysics(currentTime);
 
-        if (input.jump && isGrounded && !this.isJumping) {
-            this.isJumping = true;
-            this.currentVerticalSpeed = GameConstants.JUMP_INITIAL_SPEED;
-            this.currentFrame = 0;
-            this.lastFrameTime = currentTime;
+        switch (fsmState) {
+            case IDLE: case RUNNING: case LANDING:
+                handleControllableStateInput(input, currentTime);
+                break;
+            case BLOCKING:
+                if (input.primaryAction != PlayerAction.BLOCK) { setToIdle(); }
+                break;
+            case CROUCHING:
+                if (input.primaryAction == PlayerAction.KICK && input.modifiers.contains(ActionModifier.S)) {
+                    startAction(CharacterFSMState.KICK_LOW, currentTime);
+                } else if (input.primaryAction != PlayerAction.CROUCH) {
+                    setToIdle();
+                }
+                break;
+            case PUNCH_NORMAL:
+                if (isActionFinished(currentTime, 300)) { setToIdle(); }
+                break;
+            case KICK_NORMAL:
+                if (isActionFinished(currentTime, 400)) { setToIdle(); }
+                break;
+            case DASHING:
+                if (isActionFinished(currentTime, 150)) { setToIdle(); }
+                break;
+            case JUMPING: case FALLING:
+                handleAirborneInput(input, currentTime);
+                break;
+            default:
+                setToIdle();
+                break;
         }
+        updateAnimation(currentTime);
+    }
 
-        boolean wantMove = input.moveLeft || input.moveRight;
-        boolean allowMove = !isJumping;
-
-        if (allowMove) {
-            if (input.moveLeft) {
-                this.x -= GameConstants.SPEED_X;
-                this.isFacingRight = false;
-            }
-            if (input.moveRight) {
-                this.x += GameConstants.SPEED_X;
-                this.isFacingRight = true;
-            }
-        }
-
+    private void updatePhysics(long currentTime) {
         this.y += this.currentVerticalSpeed;
         this.currentVerticalSpeed += GameConstants.GRAVITY;
 
-        if (this.y > GameConstants.GROUND_LEVEL) {
+        if (this.fsmState == CharacterFSMState.JUMPING && this.currentVerticalSpeed >= 0) {
+            this.fsmState = CharacterFSMState.FALLING;
+        }
+
+        boolean onGround = (this.y >= GameConstants.GROUND_LEVEL);
+        if (onGround) {
             this.y = GameConstants.GROUND_LEVEL;
             this.currentVerticalSpeed = 0;
-            if (this.isJumping) {
 
-                this.isJumping = false;
-                setToIdlePose();
+            if (this.fsmState == CharacterFSMState.FALLING) {
+                startAction(CharacterFSMState.LANDING, currentTime, 100);
             }
         }
+    }
 
-        if (isJumping) {
-            if (currentTime - lastFrameTime >= GameConstants.TIME_PER_JUMP_FRAME) {
-                lastFrameTime = currentTime;
-                if (currentFrame < jumpKeyframes.size()) {
-                    this.currentPose = jumpKeyframes.get(currentFrame);
-                    currentFrame++;
+    private void handleControllableStateInput(InputPacket input, long currentTime) {
+        switch (input.primaryAction) {
+            case BLOCK:
+                startAction(CharacterFSMState.BLOCKING, currentTime);
+                break;
+            case DASH:
+                if (input.modifiers.contains(ActionModifier.D)) {
+                    this.x += GameConstants.DASH_DISTANCE;
+                    this.isFacingRight = true;
+                } else if (input.modifiers.contains(ActionModifier.A)) {
+                    this.x -= GameConstants.DASH_DISTANCE;
+                    this.isFacingRight = false;
                 }
-            }
-        } else if (wantMove) {
-            if (currentTime - lastFrameTime > GameConstants.TIME_PER_RUN_FRAME) {
-                lastFrameTime = currentTime;
-                List<Pose> anim = isFacingRight ? runRightKeyframes : runLeftKeyframes;
-                currentFrame = (currentFrame + 1) % anim.size();
-                this.currentPose = anim.get(currentFrame);
-            }
-        } else {
-            setToIdlePose();
+                startAction(CharacterFSMState.DASHING, currentTime);
+                break;
+            case PUNCH:
+                if (input.modifiers.contains(ActionModifier.W)) startAction(CharacterFSMState.PUNCH_HOOK, currentTime);
+                else if (input.modifiers.contains(ActionModifier.ENTER)) startAction(CharacterFSMState.PUNCH_HEAVY, currentTime);
+                else startAction(CharacterFSMState.PUNCH_NORMAL, currentTime);
+                break;
+            case KICK:
+                if (input.modifiers.contains(ActionModifier.W)) startAction(CharacterFSMState.KICK_HIGH, currentTime);
+                else if (input.modifiers.contains(ActionModifier.S)) startAction(CharacterFSMState.KICK_LOW, currentTime);
+                else startAction(CharacterFSMState.KICK_NORMAL, currentTime);
+                break;
+            case JUMP:
+                if (fsmState == CharacterFSMState.IDLE || fsmState == CharacterFSMState.RUNNING || fsmState == CharacterFSMState.LANDING) {
+                    this.currentVerticalSpeed = GameConstants.JUMP_INITIAL_SPEED;
+                    startAction(CharacterFSMState.JUMPING, currentTime);
+                }
+                break;
+            case CROUCH:
+                startAction(CharacterFSMState.CROUCHING, currentTime);
+                break;
+            case MOVE:
+                // Chỉ reset frame nếu chuyển từ đứng im sang chạy
+                if (this.fsmState != CharacterFSMState.RUNNING) {
+                    this.currentFrame = -1;
+                }
+                this.fsmState = CharacterFSMState.RUNNING;
+                if (input.modifiers.contains(ActionModifier.A)) {
+                    this.x -= GameConstants.SPEED_X; this.isFacingRight = false;
+                }
+                if (input.modifiers.contains(ActionModifier.D)) {
+                    this.x += GameConstants.SPEED_X; this.isFacingRight = true;
+                }
+                break;
+            case IDLE:
+            default:
+                // Chỉ chuyển về idle nếu đang ở trạng thái chạy
+                if (this.fsmState == CharacterFSMState.RUNNING) {
+                    setToIdle();
+                }
+                break;
         }
     }
 
-    public Pose getCurrentPose() {
-        return this.currentPose;
+    private void handleAirborneInput(InputPacket input, long currentTime) {
+        if (input.primaryAction == PlayerAction.MOVE) {
+            if (input.modifiers.contains(ActionModifier.A)) this.x -= GameConstants.SPEED_X / 2;
+            if (input.modifiers.contains(ActionModifier.D)) this.x += GameConstants.SPEED_X / 2;
+        }
+        if (input.primaryAction == PlayerAction.KICK && input.modifiers.contains(ActionModifier.ENTER)) {
+            startAction(CharacterFSMState.KICK_AERIAL, currentTime);
+        }
     }
 
-    private void setToIdlePose() {
-        this.currentPose = new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5);
+    private void updateAnimation(long currentTime) {
+        long timePerFrame = (fsmState == CharacterFSMState.JUMPING || fsmState == CharacterFSMState.FALLING)
+                ? GameConstants.TIME_PER_JUMP_FRAME : GameConstants.TIME_PER_RUN_FRAME;
+        if (currentTime - lastFrameTime < timePerFrame) return;
+        lastFrameTime = currentTime;
+        List<Pose> currentAnimList = getAnimationForState(fsmState);
+        boolean loop = isAnimationLooping(fsmState);
+        if (currentAnimList.isEmpty()) {
+            this.currentPose = idleKeyframes.get(0);
+            return;
+        }
+        if (loop) {
+            currentFrame = (currentFrame + 1) % currentAnimList.size();
+        } else {
+            if (currentFrame < currentAnimList.size() - 1) {
+                currentFrame++;
+            }
+        }
+        this.currentPose = currentAnimList.get(currentFrame);
+
+        this.skeleton.updatePointsFromPose(this.x, this.y, this.currentPose);
+    }
+
+    private List<Pose> getAnimationForState(CharacterFSMState state) {
+        switch (state) {
+            case IDLE: case LANDING: return idleKeyframes;
+            case RUNNING: return isFacingRight ? runRightKeyframes : runLeftKeyframes;
+            case JUMPING: case FALLING: return jumpKeyframes;
+            case PUNCH_NORMAL: case PUNCH_HOOK: case PUNCH_HEAVY: return isFacingRight ? punchRightKeyframes : punchLeftKeyframes;
+            case KICK_NORMAL: case KICK_AERIAL: case KICK_HIGH: case KICK_LOW: return isFacingRight ? kickRightKeyframes : kickLeftKeyframes;
+            case BLOCKING: return isFacingRight ? blockRightKeyframes : blockLeftKeyframes;
+            case CROUCHING: return crouchKeyframes;
+            case DASHING: return isFacingRight ? dashRightKeyframes : dashLeftKeyframes;
+            default: return idleKeyframes;
+        }
+    }
+
+    private boolean isAnimationLooping(CharacterFSMState state) {
+        return state == CharacterFSMState.IDLE || state == CharacterFSMState.RUNNING;
+    }
+
+    private void startAction(CharacterFSMState newState, long currentTime) {
+        this.fsmState = newState;
+        this.actionStartTime = currentTime;
         this.currentFrame = -1;
+    }
+
+    private void startAction(CharacterFSMState newState, long currentTime, long duration) {
+        startAction(newState, currentTime);
+    }
+
+    private void setToIdle() {
+        this.fsmState = CharacterFSMState.IDLE;
+        this.currentFrame = -1;
+    }
+
+    private boolean isActionFinished(long currentTime, long duration) {
+        return currentTime - actionStartTime > duration;
+    }
+
+    public Pose getCurrentPose() { return this.currentPose; }
+
+    public List<Shape> getHurtboxes() {
+        List<Shape> hurtboxes = new ArrayList<>();
+        if (this.currentPose == null) return hurtboxes;
+
+        // Hurtbox cho thân (một hình chữ nhật xoay theo thân)
+        Rectangle torsoRect = new Rectangle(-5, 0, 11, (int)skeleton.getTorsoLength());
+        AffineTransform torsoTransform = new AffineTransform();
+        torsoTransform.translate(skeleton.hip.x, skeleton.hip.y);
+        torsoTransform.rotate(this.currentPose.torso);
+        hurtboxes.add(new Area(torsoRect).createTransformedArea(torsoTransform));
+
+        // Hurtbox cho đầu (một hình tròn)
+        hurtboxes.add(new Ellipse2D.Double(
+                skeleton.headCenter.x - skeleton.getHeadRadius(),
+                skeleton.headCenter.y - skeleton.getHeadRadius(),
+                skeleton.getHeadRadius() * 2,
+                skeleton.getHeadRadius() * 2
+        ));
+
+        // Có thể thêm hurtbox cho chân sau nếu muốn
+        return hurtboxes;
+    }
+
+    public Rectangle getActiveHitbox() {
+
+        if (this.fsmState == CharacterFSMState.PUNCH_NORMAL && (currentFrame == 1 || currentFrame == 2)) {
+            int hitboxX = isFacingRight ? (int)x + 10 : (int)x - 40;
+            int hitboxY = (int)y - 70;
+            return new Rectangle(hitboxX, hitboxY, 30, 20);
+        }
+
+        if (this.fsmState == CharacterFSMState.KICK_NORMAL && (currentFrame == 1)) {
+            int hitboxX = isFacingRight ? (int)x + 20 : (int)x - 60;
+            int hitboxY = (int)y - 20;
+            return new Rectangle(hitboxX, hitboxY, 40, 25);
+        }
+
+        return null;
     }
 }
