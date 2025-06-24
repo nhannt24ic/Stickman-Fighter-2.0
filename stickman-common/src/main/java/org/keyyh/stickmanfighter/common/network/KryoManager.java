@@ -6,7 +6,7 @@ import org.keyyh.stickmanfighter.common.enums.ActionModifier;
 import org.keyyh.stickmanfighter.common.enums.CharacterFSMState;
 import org.keyyh.stickmanfighter.common.enums.PlayerAction;
 
-import java.awt.Rectangle;
+import java.awt.geom.Line2D;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.UUID;
@@ -25,6 +25,6 @@ public class KryoManager {
         kryo.register(ActionModifier.class);
         kryo.register(CharacterFSMState.class);
         kryo.register(HashSet.class);
-        kryo.register(Rectangle.class);
+        kryo.register(Line2D.Double.class, new Line2DSerializer());
     }
 }

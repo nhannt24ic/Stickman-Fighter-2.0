@@ -7,10 +7,7 @@ import org.keyyh.stickmanfighter.common.game.GameConstants;
 import org.keyyh.stickmanfighter.common.game.Skeleton;
 
 import java.awt.*;
-import java.awt.geom.AffineTransform;
-import java.awt.geom.Area;
-import java.awt.geom.Ellipse2D;
-import java.awt.geom.Point2D;
+import java.awt.geom.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -33,7 +30,7 @@ public class StickmanCharacter {
 
     // Dữ liệu hiển thị
     private final Skeleton skeleton = new Skeleton();
-    private Rectangle activeHitbox;
+    private Line2D.Double activeHitbox;
     private float lineWidth = 6f;
 
     public StickmanCharacter(UUID id, double rootX, double rootY, Color characterColor, boolean isAI) {
@@ -46,11 +43,8 @@ public class StickmanCharacter {
         this.startY = this.targetY = rootY;
         this.startTime = this.targetTime = System.currentTimeMillis();
 
-        // Khởi tạo bộ xương với tư thế nghỉ
-        updateSkeleton(new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5));
     }
 
-    // Cập nhật bộ xương với một Pose mới
     private void updateSkeleton(Pose pose) {
         if (pose != null) {
             this.skeleton.updatePointsFromPose(this.rootX, this.rootY, pose);
@@ -95,8 +89,6 @@ public class StickmanCharacter {
         this.targetY = newState.y;
         this.targetTime = packetTimestamp;
         this.activeHitbox = newState.activeHitbox;
-        // Áp dụng pose mới cho bộ đệm, nó sẽ được dùng khi nội suy
-        // Việc này đảm bảo animation cũng mượt theo
         if (newState.currentPose != null) {
             applyPoseToSkeleton(newState.currentPose);
         }
@@ -114,7 +106,6 @@ public class StickmanCharacter {
         updateSkeleton(skeleton.getLastAppliedPose());
     }
 
-    // Wrapper để gọi đến skeleton
     public void applyPoseToSkeleton(Pose pose) {
         if (pose != null) {
             this.skeleton.updatePointsFromPose(this.rootX, this.rootY, pose);
@@ -125,24 +116,24 @@ public class StickmanCharacter {
         List<Shape> hurtboxes = new ArrayList<>();
         if (skeleton.getLastAppliedPose() == null) return hurtboxes;
 
-        Rectangle torsoRect = new Rectangle(-5, (int) -skeleton.getTorsoLength(), 11, (int) skeleton.getTorsoLength());
+        Rectangle torsoRect = new Rectangle(-5, (int) -this.skeleton.getTorsoLength(), 11, (int) this.skeleton.getTorsoLength());
         AffineTransform torsoTransform = new AffineTransform();
         torsoTransform.translate(skeleton.hip.x, skeleton.hip.y);
         torsoTransform.rotate(skeleton.getLastAppliedPose().torso);
         hurtboxes.add(torsoTransform.createTransformedShape(torsoRect));
 
         hurtboxes.add(new Ellipse2D.Double(
-                skeleton.headCenter.x - skeleton.getHeadRadius(),
-                skeleton.headCenter.y - skeleton.getHeadRadius(),
-                skeleton.getHeadRadius() * 2,
-                skeleton.getHeadRadius() * 2
+                skeleton.headCenter.x - this.skeleton.getHeadRadius(),
+                skeleton.headCenter.y - this.skeleton.getHeadRadius(),
+                this.skeleton.getHeadRadius() * 2,
+                this.skeleton.getHeadRadius() * 2
         ));
         return hurtboxes;
     }
 
     public void draw(Graphics2D g2d) {
         g2d.setColor(this.characterColor);
-        g2d.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2d.setStroke(new BasicStroke(lineWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
         g2d.drawLine((int) skeleton.hip.x, (int) skeleton.hip.y, (int) skeleton.neck.x, (int) skeleton.neck.y);
         g2d.drawOval((int) (skeleton.headCenter.x - skeleton.getHeadRadius()), (int) (skeleton.headCenter.y - skeleton.getHeadRadius()), (int) (skeleton.getHeadRadius() * 2), (int) (skeleton.getHeadRadius() * 2));
@@ -167,7 +158,8 @@ public class StickmanCharacter {
         }
         if (activeHitbox != null) {
             g2d.setColor(new Color(255, 0, 0, 120));
-            g2d.fill(activeHitbox);
+            g2d.setStroke(new BasicStroke(lineWidth));
+            g2d.draw(activeHitbox);
         }
     }
 

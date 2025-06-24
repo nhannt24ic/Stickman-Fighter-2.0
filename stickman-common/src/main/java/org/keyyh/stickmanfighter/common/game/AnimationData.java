@@ -23,6 +23,12 @@ public final class AnimationData {
     }
 
     // --- Dữ liệu animation gốc (hướng phải) ---
+    public static List<Pose> createIdleFacingRightKeyframes() {
+        List<Pose> keyframes = new ArrayList<>();
+        keyframes.add(new Pose(0, 0, 75, -130, 55, -110, 100, 0, 70, 10));
+        return keyframes;
+    }
+
     public static List<Pose> createRunRightKeyframes() {
         List<Pose> keyframes = new ArrayList<>();
         keyframes.add(new Pose(40, 0,  175 - 40 , -20, 40 - 40, -110, 135, 10, 20, 80));
@@ -37,16 +43,18 @@ public final class AnimationData {
 
     public static List<Pose> createPunchRightKeyframes() {
         List<Pose> keyframes = new ArrayList<>();
-        keyframes.add(new Pose(10, 0, 90, -90, 60, 10, 120, 0, 60, 0));
-        keyframes.add(new Pose(10, 0, 0, -20, 60, 10, 120, 0, 60, 0));
-        keyframes.add(new Pose(10, 0, 45, -45, 60, 10, 120, 0, 60, 0));
+        keyframes.add(new Pose(0, 0, 75, -150, 45, -110, 100, 0, 70, 10));
+        keyframes.add(new Pose(0, 0, 75, -150, 30, -75, 100, 0, 70, 10));
+        keyframes.add(new Pose(0, 0, 75, -150, 0, 0, 100, 0, 70, 10));
         return keyframes;
     }
 
     public static List<Pose> createKickRightKeyframes() {
         List<Pose> keyframes = new ArrayList<>();
-        keyframes.add(new Pose(-10, 0, 135, 0, 50, 0, 100, 0, 20, 90));
-        keyframes.add(new Pose(-15, 0, 140, 0, 55, 0, 110, 0, -30, 10));
+        keyframes.add(new Pose(-10, 0, 110+10, -150, 70, -140, 90, 0, 10, 160));
+        keyframes.add(new Pose(-10, 0, 110+10, -150, 70, -140, 90, 0, 0, 135));
+        keyframes.add(new Pose(-10, 0, 110+10, -150, 70, -140, 90, 0, -10, 80));
+        keyframes.add(new Pose(-10, 0, 110+10, -150, 70, -140, 90, 0, -10, 0));
         return keyframes;
     }
 
@@ -63,6 +71,10 @@ public final class AnimationData {
     }
 
     // --- Các hàm tạo animation lật ngược (hướng trái) ---
+    public static List<Pose> createIdleFacingLeftKeyframes() {
+        return createIdleFacingRightKeyframes().stream().map(AnimationData::mirrorPose).collect(Collectors.toList());
+    }
+
     public static List<Pose> createRunLeftKeyframes() {
         return createRunRightKeyframes().stream().map(AnimationData::mirrorPose).collect(Collectors.toList());
     }
@@ -99,12 +111,6 @@ public final class AnimationData {
     public static List<Pose> createCrouchKeyframes() {
         List<Pose> keyframes = new ArrayList<>();
         keyframes.add(new Pose(45, -10, 80, -60, 100, -60, 100, 80, 80, 80));
-        return keyframes;
-    }
-
-    public static List<Pose> createIdleKeyframes() {
-        List<Pose> keyframes = new ArrayList<>();
-        keyframes.add(new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5));
         return keyframes;
     }
 }

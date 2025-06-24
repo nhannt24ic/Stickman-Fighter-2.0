@@ -73,15 +73,11 @@ public class GameScreen extends JPanel implements ActionListener {
         gameLoopTimer.start();
     }
 
-    // <<< THAY ĐỔI: Tạm thời vô hiệu hóa logic dự đoán cục bộ
     @Override
     public void actionPerformed(ActionEvent e) {
-        // Gửi input mới đi server
+
         sendInputToServer();
 
-        // Tạm thời chỉ chạy logic nội suy cho tất cả nhân vật.
-        // Mục tiêu là để kiểm tra xem server có nhận được InputPacket mới không.
-        // Nhân vật của bạn sẽ có cảm giác lag trong bước này, điều đó là bình thường.
         long synchronizedServerTime = System.currentTimeMillis() - clockOffset;
         long renderTime = synchronizedServerTime - 100;
         for (StickmanCharacter character : characters.values()) {
@@ -140,11 +136,9 @@ public class GameScreen extends JPanel implements ActionListener {
         });
     }
 
-    // <<< THAY ĐỔI: Gửi đi InputPacket với cấu trúc mới
     private void sendInputToServer() {
         if (clientSocket == null) return;
         try {
-            // Lấy gói tin đã được xử lý logic tổ hợp phím từ InputHandler
             InputPacket packetToSend = inputHandler.getCurrentInputPacket();
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -163,7 +157,6 @@ public class GameScreen extends JPanel implements ActionListener {
         return myPlayerId != null && myPlayerId.equals(characterId);
     }
 
-    // <<< GIỮ NGUYÊN: Toàn bộ logic vẽ của bạn không bị thay đổi
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -201,7 +194,6 @@ public class GameScreen extends JPanel implements ActionListener {
         }
     }
 
-    // <<< THAY ĐỔI: Toàn bộ lớp InputHandler được viết lại
     public static class InputHandler extends KeyAdapter {
         private final Set<Integer> pressedKeys = Collections.synchronizedSet(new HashSet<>());
 

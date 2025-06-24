@@ -9,10 +9,10 @@ public class Skeleton {
     private final double torsoLength = 60;
     private final double neckLength = 17;
     private final double shoulderWidthFromBodyCenter = 2;
-    private final double upperArmLength = 40;
-    private final double lowerArmLength = 35;
+    private final double upperArmLength = 35;
+    private final double lowerArmLength = 40;
     private final double thighLength = 50;
-    private final double calfLength = 45;
+    private final double calfLength = 55;
 
     // Các điểm khớp xương công khai để dễ dàng truy cập
     public final Point2D.Double hip = new Point2D.Double();

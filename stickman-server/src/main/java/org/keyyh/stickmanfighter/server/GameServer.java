@@ -8,12 +8,14 @@ import org.keyyh.stickmanfighter.common.enums.PlayerAction;
 import org.keyyh.stickmanfighter.common.network.KryoManager;
 import org.keyyh.stickmanfighter.server.game.StickmanCharacterServer;
 
-import java.awt.Rectangle;
-import java.awt.Shape; // <<< THÊM MỚI
+import java.awt.*;
+import java.awt.geom.Area;
+import java.awt.geom.Line2D;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.*;
 import java.util.*;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -131,23 +133,25 @@ public class GameServer {
         }
     }
 
-    // <<< THAY ĐỔI: Sửa lại hoàn toàn để làm việc với Shape
     private void checkAttack(StickmanCharacterServer attacker, StickmanCharacterServer defender) {
-        Rectangle hitbox = attacker.getActiveHitbox();
-        if (hitbox == null) {
+        Line2D.Double hitboxLine = (Line2D.Double) attacker.getActiveHitbox();
+        if (hitboxLine == null) {
             return;
         }
+        float hitboxThickness = 6.0f;
+        BasicStroke stroke = new BasicStroke(hitboxThickness, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+        Shape strokedHitbox = stroke.createStrokedShape(hitboxLine);
+        Area hitboxArea = new Area(strokedHitbox);
 
-        // Lấy danh sách các Shape (vùng nhận sát thương) của người phòng thủ
         List<Shape> hurtboxes = defender.getHurtboxes();
         for (Shape hurtbox : hurtboxes) {
-            // Kiểm tra nếu hurtbox (Area, Ellipse) GIAO với hitbox (Rectangle)
-            // Phương thức intersects của Shape có thể nhận một Rectangle
-            if (hurtbox.intersects(hitbox)) {
+            Area hurtboxArea = new Area(hurtbox);
+            hurtboxArea.intersect(hitboxArea);
+            if (!hurtboxArea.isEmpty()) {
                 System.out.printf("HIT! Player %s attacked Player %s%n", attacker.id, defender.id);
                 // TODO: Áp dụng sát thương và trạng thái
                 // defender.takeHit(...);
-                break; // Thoát khỏi vòng lặp sau khi đã xác nhận trúng đòn
+                break;
             }
         }
     }

@@ -2,7 +2,7 @@ package org.keyyh.stickmanfighter.common.data;
 
 import org.keyyh.stickmanfighter.common.enums.CharacterFSMState;
 
-import java.awt.Rectangle;
+import java.awt.geom.Line2D;
 import java.io.Serializable;
 import java.util.UUID;
 
@@ -15,11 +15,11 @@ public class CharacterState implements Serializable {
     public Pose currentPose;
     public boolean isFacingRight;
     public CharacterFSMState fsmState;
-    public Rectangle activeHitbox;
+    public Line2D.Double activeHitbox;
 
     public CharacterState() {}
 
-    public CharacterState(UUID id, double x, double y, Pose currentPose, boolean isFacingRight, CharacterFSMState fsmState, Rectangle activeHitbox) {
+    public CharacterState(UUID id, double x, double y, Pose currentPose, boolean isFacingRight, CharacterFSMState fsmState, Line2D.Double activeHitbox) {
         this.id = id;
         this.x = x;
         this.y = y;

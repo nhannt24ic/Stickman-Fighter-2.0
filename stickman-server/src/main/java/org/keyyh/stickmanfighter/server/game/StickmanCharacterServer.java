@@ -10,9 +10,7 @@ import org.keyyh.stickmanfighter.common.game.GameConstants;
 import org.keyyh.stickmanfighter.common.game.Skeleton;
 
 import java.awt.*;
-import java.awt.geom.AffineTransform;
-import java.awt.geom.Area;
-import java.awt.geom.Ellipse2D;
+import java.awt.geom.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -31,7 +29,8 @@ public class StickmanCharacterServer {
     private long actionStartTime;
     private long lastFrameTime;
 
-    private final List<Pose> idleKeyframes, jumpKeyframes, crouchKeyframes;
+    private final List<Pose> jumpKeyframes, crouchKeyframes;
+    private final List<Pose> idleFacingRightKeyframes, idleFacingLeftKeyframes;
     private final List<Pose> runRightKeyframes, runLeftKeyframes;
     private final List<Pose> punchRightKeyframes, punchLeftKeyframes;
     private final List<Pose> kickRightKeyframes, kickLeftKeyframes;
@@ -45,9 +44,11 @@ public class StickmanCharacterServer {
         this.isFacingRight = true;
         this.lastUpdateTime = System.currentTimeMillis();
 
-        this.idleKeyframes = AnimationData.createIdleKeyframes();
         this.jumpKeyframes = AnimationData.createJumpKeyframes();
         this.crouchKeyframes = AnimationData.createCrouchKeyframes();
+
+        this.idleFacingRightKeyframes = AnimationData.createIdleFacingRightKeyframes();
+        this.idleFacingLeftKeyframes = AnimationData.createIdleFacingLeftKeyframes();
 
         this.blockRightKeyframes = AnimationData.createBlockRightKeyframes();
         this.blockLeftKeyframes = AnimationData.createBlockLeftKeyframes();
@@ -91,7 +92,7 @@ public class StickmanCharacterServer {
                 if (isActionFinished(currentTime, 400)) { setToIdle(); }
                 break;
             case DASHING:
-                if (isActionFinished(currentTime, 150)) { setToIdle(); }
+                if (isActionFinished(currentTime, 500)) { setToIdle(); }
                 break;
             case JUMPING: case FALLING:
                 handleAirborneInput(input, currentTime);
@@ -157,7 +158,7 @@ public class StickmanCharacterServer {
                 startAction(CharacterFSMState.CROUCHING, currentTime);
                 break;
             case MOVE:
-                // Chỉ reset frame nếu chuyển từ đứng im sang chạy
+
                 if (this.fsmState != CharacterFSMState.RUNNING) {
                     this.currentFrame = -1;
                 }
@@ -171,7 +172,7 @@ public class StickmanCharacterServer {
                 break;
             case IDLE:
             default:
-                // Chỉ chuyển về idle nếu đang ở trạng thái chạy
+
                 if (this.fsmState == CharacterFSMState.RUNNING) {
                     setToIdle();
                 }
@@ -197,7 +198,10 @@ public class StickmanCharacterServer {
         List<Pose> currentAnimList = getAnimationForState(fsmState);
         boolean loop = isAnimationLooping(fsmState);
         if (currentAnimList.isEmpty()) {
-            this.currentPose = idleKeyframes.get(0);
+            if(isFacingRight)
+                this.currentPose = idleFacingRightKeyframes.get(0);
+            else
+                this.currentPose = idleFacingLeftKeyframes.get(0);
             return;
         }
         if (loop) {
@@ -214,7 +218,7 @@ public class StickmanCharacterServer {
 
     private List<Pose> getAnimationForState(CharacterFSMState state) {
         switch (state) {
-            case IDLE: case LANDING: return idleKeyframes;
+            case IDLE: case LANDING: return isFacingRight ? idleFacingRightKeyframes : idleFacingLeftKeyframes;
             case RUNNING: return isFacingRight ? runRightKeyframes : runLeftKeyframes;
             case JUMPING: case FALLING: return jumpKeyframes;
             case PUNCH_NORMAL: case PUNCH_HOOK: case PUNCH_HEAVY: return isFacingRight ? punchRightKeyframes : punchLeftKeyframes;
@@ -222,7 +226,7 @@ public class StickmanCharacterServer {
             case BLOCKING: return isFacingRight ? blockRightKeyframes : blockLeftKeyframes;
             case CROUCHING: return crouchKeyframes;
             case DASHING: return isFacingRight ? dashRightKeyframes : dashLeftKeyframes;
-            default: return idleKeyframes;
+            default: return idleFacingRightKeyframes;
         }
     }
 
@@ -255,39 +259,46 @@ public class StickmanCharacterServer {
         List<Shape> hurtboxes = new ArrayList<>();
         if (this.currentPose == null) return hurtboxes;
 
-        // Hurtbox cho thân (một hình chữ nhật xoay theo thân)
-        Rectangle torsoRect = new Rectangle(-5, 0, 11, (int)skeleton.getTorsoLength());
+        Rectangle torsoRect = new Rectangle(-5, (int) -this.skeleton.getTorsoLength(), 11, (int) this.skeleton.getTorsoLength());
         AffineTransform torsoTransform = new AffineTransform();
         torsoTransform.translate(skeleton.hip.x, skeleton.hip.y);
         torsoTransform.rotate(this.currentPose.torso);
-        hurtboxes.add(new Area(torsoRect).createTransformedArea(torsoTransform));
+        hurtboxes.add(torsoTransform.createTransformedShape(torsoRect));
 
-        // Hurtbox cho đầu (một hình tròn)
         hurtboxes.add(new Ellipse2D.Double(
-                skeleton.headCenter.x - skeleton.getHeadRadius(),
-                skeleton.headCenter.y - skeleton.getHeadRadius(),
-                skeleton.getHeadRadius() * 2,
-                skeleton.getHeadRadius() * 2
+                skeleton.headCenter.x - this.skeleton.getHeadRadius(),
+                skeleton.headCenter.y - this.skeleton.getHeadRadius(),
+                this.skeleton.getHeadRadius() * 2,
+                this.skeleton.getHeadRadius() * 2
         ));
-
-        // Có thể thêm hurtbox cho chân sau nếu muốn
         return hurtboxes;
     }
 
-    public Rectangle getActiveHitbox() {
+    public Line2D.Double getActiveHitbox() {
+        if (this.fsmState == CharacterFSMState.PUNCH_NORMAL && (currentFrame >= 1 && currentFrame <= 3)) {
+            Point2D.Double startPoint, endPoint;
+            if (isFacingRight) {
+                startPoint = skeleton.elbowR;
+                endPoint = skeleton.wristR;
+            } else {
+                startPoint = skeleton.elbowL;
+                endPoint = skeleton.wristL;
+            }
 
-        if (this.fsmState == CharacterFSMState.PUNCH_NORMAL && (currentFrame == 1 || currentFrame == 2)) {
-            int hitboxX = isFacingRight ? (int)x + 10 : (int)x - 40;
-            int hitboxY = (int)y - 70;
-            return new Rectangle(hitboxX, hitboxY, 30, 20);
+            return new Line2D.Double(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
         }
+        if (this.fsmState == CharacterFSMState.KICK_NORMAL && (currentFrame >= 1 && currentFrame <= 4)) {
+            Point2D.Double startPoint, endPoint;
+            if (isFacingRight) {
+                startPoint = skeleton.kneeR;
+                endPoint = skeleton.footR;
+            } else {
+                startPoint = skeleton.kneeL;
+                endPoint = skeleton.footL;
+            }
 
-        if (this.fsmState == CharacterFSMState.KICK_NORMAL && (currentFrame == 1)) {
-            int hitboxX = isFacingRight ? (int)x + 20 : (int)x - 60;
-            int hitboxY = (int)y - 20;
-            return new Rectangle(hitboxX, hitboxY, 40, 25);
+            return new Line2D.Double(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
         }
-
         return null;
     }
 }
