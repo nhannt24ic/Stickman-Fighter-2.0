@@ -108,9 +108,15 @@ public final class AnimationData {
         return keyframes;
     }
 
+    public static List<Pose> createIdleKeyframes() {
+        List<Pose> keyframes = new ArrayList<>();
+        keyframes.add(new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5));
+        return keyframes;
+    }
+
     public static List<Pose> createCrouchKeyframes() {
         List<Pose> keyframes = new ArrayList<>();
-        keyframes.add(new Pose(45, -10, 80, -60, 100, -60, 100, 80, 80, 80));
+        keyframes.add(new Pose(0, 0, 80, -60, 100, -60, 100, 80, 80, 80));
         return keyframes;
     }
 }

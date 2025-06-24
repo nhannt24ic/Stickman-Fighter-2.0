@@ -4,33 +4,31 @@ import com.esotericsoftware.kryo.Kryo;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import org.keyyh.stickmanfighter.common.data.*;
-import org.keyyh.stickmanfighter.common.enums.PlayerAction;
 import org.keyyh.stickmanfighter.common.network.KryoManager;
-import org.keyyh.stickmanfighter.server.game.StickmanCharacterServer;
+import org.keyyh.stickmanfighter.common.network.requests.*;
+import org.keyyh.stickmanfighter.common.network.responses.*;
 
-import java.awt.*;
-import java.awt.geom.Area;
-import java.awt.geom.Line2D;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.net.*;
+import java.io.Serializable;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.SocketAddress;
 import java.util.*;
-import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 public class GameServer {
     private final int port;
     private DatagramSocket socket;
     private final Kryo kryo;
-    private final Map<SocketAddress, StickmanCharacterServer> players = new ConcurrentHashMap<>();
-    private final Map<SocketAddress, InputPacket> clientInputs = new ConcurrentHashMap<>();
-    private static final long PLAYER_TIMEOUT_MS = 10000;
 
-    private final int TICKS_PER_SECOND = 60;
-    private final int MS_PER_TICK = 1000 / TICKS_PER_SECOND;
+    // Quản lý các phòng chơi đang hoạt động
+    private final Map<UUID, GameRoom> rooms = new ConcurrentHashMap<>();
+    // Quản lý xem người chơi (SocketAddress) đang ở trong phòng nào
+    private final Map<SocketAddress, GameRoom> playerToRoomMap = new ConcurrentHashMap<>();
+    // <<< THÊM MỚI: Lưu lại tất cả các client đã từng kết nối để gửi thông báo chung
+    private final Set<SocketAddress> allConnectedClients = ConcurrentHashMap.newKeySet();
 
     public GameServer(int port) {
         this.port = port;
@@ -39,180 +37,166 @@ public class GameServer {
     }
 
     public void start() throws Exception {
-        System.out.println("Game Server starting on port " + port + "...");
+        System.out.println("Lobby Server starting on port " + port + "...");
         socket = new DatagramSocket(port);
-        startPacketListener();
-        startReaperThread();
-        System.out.println("Game Server started successfully. Game loop running...");
-        gameLoop();
+        System.out.println("Lobby Server started. Waiting for clients...");
+        listenForPackets();
     }
 
-    private void gameLoop() throws Exception {
-        long nextGameTick = System.currentTimeMillis();
-        while (true) {
-            int loops = 0;
-            while (System.currentTimeMillis() > nextGameTick && loops < 5) {
-                updateGameLogic();
-                checkCollisions();
-                nextGameTick += MS_PER_TICK;
-                loops++;
-            }
-            broadcastGameState();
-            Thread.sleep(1);
-        }
-    }
-
-    private void startPacketListener() {
+    private void listenForPackets() {
         Thread listenerThread = new Thread(() -> {
             while (true) {
                 try {
-                    byte[] receiveBuffer = new byte[1024];
+                    byte[] receiveBuffer = new byte[2048];
                     DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
                     socket.receive(receivePacket);
                     handlePacket(receivePacket);
                 } catch (Exception e) {
-                    System.err.println("Error receiving packet: " + e.getMessage());
+                    System.err.println("Error processing packet: " + e.getMessage());
                 }
             }
         });
-        listenerThread.setDaemon(true);
+        listenerThread.setDaemon(false);
         listenerThread.start();
     }
 
-    private void handlePacket(DatagramPacket receivePacket) {
-        try {
-            SocketAddress clientAddress = receivePacket.getSocketAddress();
+    private void handlePacket(DatagramPacket receivePacket) throws Exception {
+        SocketAddress clientAddress = receivePacket.getSocketAddress();
+        allConnectedClients.add(clientAddress); // Thêm client vào danh sách chung
 
-            if (!players.containsKey(clientAddress)) {
-                System.out.println("New player connected: " + clientAddress);
-                UUID newId = UUID.randomUUID();
-                StickmanCharacterServer newPlayer = new StickmanCharacterServer(newId, 100 + players.size() * 200, 450);
-                players.put(clientAddress, newPlayer);
-                sendConnectionResponse(clientAddress, newId);
+        ByteArrayInputStream bais = new ByteArrayInputStream(receivePacket.getData(), 0, receivePacket.getLength());
+        Input input = new Input(bais);
+        Object request = kryo.readClassAndObject(input);
+        input.close();
+
+        // Nếu là gói tin Input trong game, chuyển tiếp nó đến đúng phòng
+        if (request instanceof InputPacket) {
+            GameRoom room = playerToRoomMap.get(clientAddress);
+            if (room != null && room.isRunning()) {
+                room.processInput(clientAddress, (InputPacket) request);
             }
-
-            ByteArrayInputStream bais = new ByteArrayInputStream(receivePacket.getData(), 0, receivePacket.getLength());
-            Input input = new Input(bais);
-            Object receivedObject = kryo.readClassAndObject(input);
-            input.close();
-
-            if (receivedObject instanceof InputPacket) {
-                clientInputs.put(clientAddress, (InputPacket) receivedObject);
-                StickmanCharacterServer character = players.get(clientAddress);
-                if (character != null) {
-                    character.lastUpdateTime = System.currentTimeMillis();
-                }
-            }
-        } catch(Exception e) {
-            System.err.println("Error handling packet: " + e.getMessage());
-        }
-    }
-
-    private void updateGameLogic() {
-        long currentTime = System.currentTimeMillis();
-        for (Map.Entry<SocketAddress, StickmanCharacterServer> entry : players.entrySet()) {
-            StickmanCharacterServer character = entry.getValue();
-            InputPacket lastInput = clientInputs.get(entry.getKey());
-            if (lastInput != null) {
-                character.update(lastInput, currentTime);
-            } else {
-                character.update(new InputPacket(PlayerAction.IDLE, Collections.emptySet()), currentTime);
-            }
-        }
-    }
-
-    private void checkCollisions() {
-        List<StickmanCharacterServer> playerList = new ArrayList<>(players.values());
-        for (int i = 0; i < playerList.size(); i++) {
-            for (int j = i + 1; j < playerList.size(); j++) {
-                StickmanCharacterServer playerA = playerList.get(i);
-                StickmanCharacterServer playerB = playerList.get(j);
-                checkAttack(playerA, playerB);
-                checkAttack(playerB, playerA);
-            }
-        }
-    }
-
-    private void checkAttack(StickmanCharacterServer attacker, StickmanCharacterServer defender) {
-        Line2D.Double hitboxLine = (Line2D.Double) attacker.getActiveHitbox();
-        if (hitboxLine == null) {
             return;
         }
-        float hitboxThickness = 6.0f;
-        BasicStroke stroke = new BasicStroke(hitboxThickness, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
-        Shape strokedHitbox = stroke.createStrokedShape(hitboxLine);
-        Area hitboxArea = new Area(strokedHitbox);
 
-        List<Shape> hurtboxes = defender.getHurtboxes();
-        for (Shape hurtbox : hurtboxes) {
-            Area hurtboxArea = new Area(hurtbox);
-            hurtboxArea.intersect(hitboxArea);
-            if (!hurtboxArea.isEmpty()) {
-                System.out.printf("HIT! Player %s attacked Player %s%n", attacker.id, defender.id);
-                // TODO: Áp dụng sát thương và trạng thái
-                // defender.takeHit(...);
-                break;
+        // Nếu là các yêu cầu liên quan đến Lobby
+        if (request instanceof ListRoomsRequest) {
+            handleListRoomsRequest(clientAddress);
+        } else if (request instanceof CreateRoomRequest) {
+            handleCreateRoomRequest(clientAddress);
+        } else if (request instanceof JoinRoomRequest) {
+            handleJoinRoomRequest((JoinRoomRequest) request, clientAddress);
+        }
+    }
+
+    private void handleListRoomsRequest(SocketAddress clientAddress) throws Exception {
+        List<RoomInfo> roomInfos = new ArrayList<>();
+        for (GameRoom room : rooms.values()) {
+            if (!room.isFull()) {
+                roomInfos.add(room.getRoomInfo());
+            }
+        }
+        sendToOne(clientAddress, new RoomListResponse(roomInfos));
+    }
+
+    private void handleCreateRoomRequest(SocketAddress clientAddress) throws Exception {
+        if (playerToRoomMap.containsKey(clientAddress)) return;
+
+        String roomName = "Room #" + (rooms.size() + 1);
+        GameRoom newRoom = new GameRoom(roomName, socket, kryo, this::removeRoom);
+        UUID playerId = addPlayerToRoom(newRoom, clientAddress);
+        rooms.put(newRoom.roomId, newRoom);
+
+        System.out.println("Player " + clientAddress + " created and joined " + roomName);
+        broadcastRoomListUpdate();
+    }
+
+    private void handleJoinRoomRequest(JoinRoomRequest request, SocketAddress clientAddress) throws Exception {
+        if (playerToRoomMap.containsKey(clientAddress)) return;
+
+        GameRoom room = rooms.get(request.roomId);
+        if (room != null && !room.isFull()) {
+            UUID playerId = addPlayerToRoom(room, clientAddress);
+            System.out.println("Player " + clientAddress + " joined room " + request.roomId);
+
+            broadcastRoomListUpdate();
+
+            if (room.isFull()) {
+                System.out.println("Room " + room.roomId + " is full. Starting game...");
+
+                GameStatePacket initialGameState = room.createCurrentGameState();
+
+                // <<< THAY ĐỔI: Gửi trực tiếp ConnectionResponsePacket cho từng người chơi
+                for(Map.Entry<UUID, SocketAddress> entry : room.getPlayerIdAddressMap().entrySet()) {
+                    UUID pId = entry.getKey();
+                    SocketAddress pAddr = entry.getValue();
+                    // Gói tin này báo cho client biết ID của nó và trạng thái game để bắt đầu
+                    ConnectionResponsePacket responsePacket = new ConnectionResponsePacket(pId, initialGameState);
+                    sendToOne(pAddr, responsePacket);
+                }
+
+                new Thread(room).start();
+            }
+        } else {
+            System.out.println("Player " + clientAddress + " failed to join room " + request.roomId);
+            // TODO: Gửi gói tin báo lỗi về cho client
+        }
+    }
+
+    private UUID addPlayerToRoom(GameRoom room, SocketAddress clientAddress) {
+        UUID playerId = UUID.randomUUID();
+        room.addPlayer(clientAddress, playerId);
+        playerToRoomMap.put(clientAddress, room);
+        return playerId;
+    }
+
+    // <<< THÊM MỚI: Hàm bị thiếu đã được implement
+    public void broadcastRoomListUpdate() throws Exception {
+        System.out.println("Broadcasting room list update to all clients in lobby.");
+        List<RoomInfo> roomInfos = new ArrayList<>();
+        for (GameRoom room : rooms.values()) {
+            // Chỉ gửi thông tin về các phòng chưa đầy
+            if (!room.isFull()) {
+                roomInfos.add(room.getRoomInfo());
+            }
+        }
+        RoomListResponse response = new RoomListResponse(roomInfos);
+
+        // Gửi cho tất cả các client đã kết nối nhưng chưa ở trong phòng nào
+        for (SocketAddress clientAddr : allConnectedClients) {
+            if (!playerToRoomMap.containsKey(clientAddr)) {
+                sendToOne(clientAddr, response);
             }
         }
     }
 
-    private void sendConnectionResponse(SocketAddress clientAddress, UUID newId) throws Exception {
-        List<CharacterState> currentStates = new ArrayList<>();
-        for (StickmanCharacterServer character : players.values()) {
-            CharacterState state = new CharacterState(
-                    character.id, character.x, character.y,
-                    character.getCurrentPose(), character.isFacingRight, character.fsmState,
-                    character.getActiveHitbox());
-            currentStates.add(state);
-        }
-        GameStatePacket initialGameState = new GameStatePacket(currentStates, System.currentTimeMillis());
-        ConnectionResponsePacket responsePacket = new ConnectionResponsePacket(newId, initialGameState);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        Output output = new Output(baos);
-        kryo.writeClassAndObject(output, responsePacket);
-        output.close();
-        byte[] sendBuffer = baos.toByteArray();
-        DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, clientAddress);
-        socket.send(sendPacket);
-        System.out.println("Sent ConnectionResponsePacket to " + clientAddress);
-    }
-
-    private void broadcastGameState() throws Exception {
-        if (players.isEmpty()) return;
-        List<CharacterState> currentStates = new ArrayList<>();
-        for (StickmanCharacterServer serverCharacter : players.values()) {
-            CharacterState state = new CharacterState(
-                    serverCharacter.id, serverCharacter.x, serverCharacter.y,
-                    serverCharacter.getCurrentPose(), serverCharacter.isFacingRight,
-                    serverCharacter.fsmState, serverCharacter.getActiveHitbox());
-            currentStates.add(state);
-        }
-        GameStatePacket gameStatePacket = new GameStatePacket(currentStates, System.currentTimeMillis());
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        Output output = new Output(baos);
-        kryo.writeClassAndObject(output, gameStatePacket);
-        output.close();
-        byte[] sendBuffer = baos.toByteArray();
-        for (SocketAddress clientAddr : players.keySet()) {
-            DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, clientAddr);
-            socket.send(sendPacket);
+    public void removeRoom(UUID roomId) {
+        GameRoom removedRoom = rooms.remove(roomId);
+        if (removedRoom != null) {
+            for(SocketAddress addr : removedRoom.getPlayerAddresses()) {
+                playerToRoomMap.remove(addr);
+            }
+            System.out.println("Room " + roomId + " removed.");
+            try {
+                broadcastRoomListUpdate();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 
-    private void startReaperThread() {
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleAtFixedRate(() -> {
-            long currentTime = System.currentTimeMillis();
-            players.entrySet().removeIf(entry -> {
-                boolean timedOut = currentTime - entry.getValue().lastUpdateTime > PLAYER_TIMEOUT_MS;
-                if (timedOut) System.out.println("Player " + entry.getKey() + " timed out. Removing.");
-                return timedOut;
-            });
-        }, 5, 5, TimeUnit.SECONDS);
+    private void sendToOne(SocketAddress clientAddress, Serializable packetObject) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Output output = new Output(baos);
+        kryo.writeClassAndObject(output, packetObject);
+        output.close();
+        byte[] buffer = baos.toByteArray();
+        DatagramPacket packet = new DatagramPacket(buffer, buffer.length, clientAddress);
+        socket.send(packet);
     }
 
     public static void main(String[] args) {
         try {
+            // port được lấy từ constructor
             GameServer server = new GameServer(9876);
             server.start();
         } catch (Exception e) {

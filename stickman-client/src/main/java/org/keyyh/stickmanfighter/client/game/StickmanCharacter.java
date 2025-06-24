@@ -1,9 +1,7 @@
-package org.keyyh.stickmanfighter.client.game.models;
+package org.keyyh.stickmanfighter.client.game;
 
-import org.keyyh.stickmanfighter.client.gui.GameScreen;
 import org.keyyh.stickmanfighter.common.data.CharacterState;
 import org.keyyh.stickmanfighter.common.data.Pose;
-import org.keyyh.stickmanfighter.common.game.GameConstants;
 import org.keyyh.stickmanfighter.common.game.Skeleton;
 
 import java.awt.*;

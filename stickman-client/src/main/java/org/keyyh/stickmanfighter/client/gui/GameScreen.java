@@ -1,15 +1,8 @@
 package org.keyyh.stickmanfighter.client.gui;
 
-import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.io.Input;
-import com.esotericsoftware.kryo.io.Output;
-import org.keyyh.stickmanfighter.client.game.models.StickmanCharacter;
-import org.keyyh.stickmanfighter.common.data.ConnectionResponsePacket;
+import org.keyyh.stickmanfighter.client.game.StickmanCharacter;
 import org.keyyh.stickmanfighter.common.data.GameStatePacket;
 import org.keyyh.stickmanfighter.common.data.InputPacket;
-import org.keyyh.stickmanfighter.common.enums.ActionModifier;
-import org.keyyh.stickmanfighter.common.enums.PlayerAction;
-import org.keyyh.stickmanfighter.common.network.KryoManager;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -19,24 +12,18 @@ import java.awt.event.ActionListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.geom.Point2D;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import org.keyyh.stickmanfighter.client.network.NetworkClient;
+import org.keyyh.stickmanfighter.common.enums.ActionModifier;
+import org.keyyh.stickmanfighter.common.enums.PlayerAction;
 
 public class GameScreen extends JPanel implements ActionListener {
     private final int screenWidth;
     private final int screenHeight;
     private final int DELAY = 16;
-    private final Kryo kryo;
-    private DatagramSocket clientSocket;
-    private InetAddress serverAddress;
-    private final int serverPort = 9876;
     private final Map<UUID, StickmanCharacter> characters = new ConcurrentHashMap<>();
-    private InputHandler inputHandler;
+    private final InputHandler inputHandler;
     private Timer gameLoopTimer;
     private UUID myPlayerId;
     private long clockOffset = 0;
@@ -45,20 +32,15 @@ public class GameScreen extends JPanel implements ActionListener {
         this.screenWidth = width;
         this.screenHeight = height;
         this.inputHandler = new InputHandler();
-        this.kryo = new Kryo();
-        KryoManager.register(this.kryo);
-
-        try {
-            clientSocket = new DatagramSocket();
-            serverAddress = InetAddress.getByName("localhost");
-        } catch (Exception e) {
-            clientSocket = null;
-            serverAddress = null;
-            e.printStackTrace();
-        }
-
         initPanel();
-        startServerListener();
+    }
+
+    // Hàm mới để khởi tạo game với dữ liệu từ server
+    public void startGame(GameStatePacket initialState, UUID myId, long clockOffset) {
+        this.myPlayerId = myId;
+        this.clockOffset = clockOffset;
+        updateCharactersFromServer(initialState);
+        startGameLoop();
     }
 
     private void initPanel() {
@@ -75,44 +57,17 @@ public class GameScreen extends JPanel implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent e) {
-
-        sendInputToServer();
-
+        NetworkClient.getInstance().send(inputHandler.getCurrentInputPacket());
         long synchronizedServerTime = System.currentTimeMillis() - clockOffset;
         long renderTime = synchronizedServerTime - 100;
         for (StickmanCharacter character : characters.values()) {
-            character.interpolate(renderTime);
+//            if (isMyPlayer(character.getId())) {
+//                character.updateLocalPlayer(inputHandler);
+//            } else {
+                character.interpolate(renderTime);
+//            }
         }
         repaint();
-    }
-
-    private void startServerListener() {
-        Thread listenerThread = new Thread(() -> {
-            while (true) {
-                try {
-                    byte[] receiveBuffer = new byte[4096];
-                    DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
-                    clientSocket.receive(receivePacket);
-                    ByteArrayInputStream bais = new ByteArrayInputStream(receiveBuffer, 0, receivePacket.getLength());
-                    Input input = new Input(bais);
-                    Object receivedObject = kryo.readClassAndObject(input);
-                    input.close();
-                    if (receivedObject instanceof ConnectionResponsePacket) {
-                        ConnectionResponsePacket response = (ConnectionResponsePacket) receivedObject;
-                        this.myPlayerId = response.yourPlayerId;
-                        long clientTime = System.currentTimeMillis();
-                        this.clockOffset = clientTime - response.initialGameState.timestamp;
-                        updateCharactersFromServer(response.initialGameState);
-                    } else if (receivedObject instanceof GameStatePacket) {
-                        updateCharactersFromServer((GameStatePacket) receivedObject);
-                    }
-                } catch (Exception e) {
-                    // Ignore
-                }
-            }
-        });
-        listenerThread.setDaemon(true);
-        listenerThread.start();
     }
 
     private void updateCharactersFromServer(GameStatePacket packet) {
@@ -134,23 +89,6 @@ public class GameScreen extends JPanel implements ActionListener {
             }
             characters.keySet().removeIf(id -> !receivedIds.contains(id));
         });
-    }
-
-    private void sendInputToServer() {
-        if (clientSocket == null) return;
-        try {
-            InputPacket packetToSend = inputHandler.getCurrentInputPacket();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            Output output = new Output(baos);
-            kryo.writeClassAndObject(output, packetToSend);
-            output.close();
-            byte[] sendBuffer = baos.toByteArray();
-            DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, serverAddress, serverPort);
-            clientSocket.send(sendPacket);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 
     private boolean isMyPlayer(UUID characterId) {

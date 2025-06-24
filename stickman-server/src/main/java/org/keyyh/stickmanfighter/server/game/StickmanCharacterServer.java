@@ -11,9 +11,8 @@ import org.keyyh.stickmanfighter.common.game.Skeleton;
 
 import java.awt.*;
 import java.awt.geom.*;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.List;
-import java.util.UUID;
 
 public class StickmanCharacterServer {
     public final UUID id;
@@ -22,12 +21,17 @@ public class StickmanCharacterServer {
     public long lastUpdateTime;
     public CharacterFSMState fsmState;
 
+    private double health;
+    private double stamina;
+
     private final Skeleton skeleton = new Skeleton();
     private double currentVerticalSpeed = 0;
     private Pose currentPose;
     private int currentFrame;
     private long actionStartTime;
     private long lastFrameTime;
+
+    private final Set<UUID> hitTargetsInCurrentAction = new HashSet<>();
 
     private final List<Pose> jumpKeyframes, crouchKeyframes;
     private final List<Pose> idleFacingRightKeyframes, idleFacingLeftKeyframes;
@@ -41,6 +45,10 @@ public class StickmanCharacterServer {
         this.id = id;
         this.x = startX;
         this.y = startY;
+
+        this.health = GameConstants.MAX_HEALTH;
+        this.stamina = GameConstants.MAX_STAMINA;
+
         this.isFacingRight = true;
         this.lastUpdateTime = System.currentTimeMillis();
 
@@ -86,10 +94,10 @@ public class StickmanCharacterServer {
                 }
                 break;
             case PUNCH_NORMAL:
-                if (isActionFinished(currentTime, 300)) { setToIdle(); }
+                if (isActionFinished(currentTime, 400)) { setToIdle(); }
                 break;
             case KICK_NORMAL:
-                if (isActionFinished(currentTime, 400)) { setToIdle(); }
+                if (isActionFinished(currentTime, 500)) { setToIdle(); }
                 break;
             case DASHING:
                 if (isActionFinished(currentTime, 500)) { setToIdle(); }
@@ -102,6 +110,24 @@ public class StickmanCharacterServer {
                 break;
         }
         updateAnimation(currentTime);
+    }
+
+    public void takeDamage(double damage) {
+        this.health -= damage;
+        if (this.health < 0) {
+            this.health = 0;
+        }
+        // TODO: Chuyển sang trạng thái HIT_STUN khi bị đánh
+        System.out.printf("Player %s took %.1f damage, remaining health: %.1f%n", this.id, damage, this.health);
+    }
+
+    private boolean canAfford(double cost) {
+        return this.stamina >= cost;
+    }
+
+    private void spendStamina(double cost) {
+        this.stamina -= cost;
+        if (this.stamina < 0) this.stamina = 0;
     }
 
     private void updatePhysics(long currentTime) {
@@ -118,7 +144,7 @@ public class StickmanCharacterServer {
             this.currentVerticalSpeed = 0;
 
             if (this.fsmState == CharacterFSMState.FALLING) {
-                startAction(CharacterFSMState.LANDING, currentTime, 100);
+                startAction(CharacterFSMState.LANDING, currentTime);
             }
         }
     }
@@ -129,27 +155,37 @@ public class StickmanCharacterServer {
                 startAction(CharacterFSMState.BLOCKING, currentTime);
                 break;
             case DASH:
-                if (input.modifiers.contains(ActionModifier.D)) {
-                    this.x += GameConstants.DASH_DISTANCE;
-                    this.isFacingRight = true;
-                } else if (input.modifiers.contains(ActionModifier.A)) {
-                    this.x -= GameConstants.DASH_DISTANCE;
-                    this.isFacingRight = false;
+                if (canAfford(GameConstants.DASH_STAMINA_COST)){
+                    spendStamina(GameConstants.DASH_STAMINA_COST);
+                    if (input.modifiers.contains(ActionModifier.D)) {
+                        this.x += GameConstants.DASH_DISTANCE;
+                        this.isFacingRight = true;
+                    } else if (input.modifiers.contains(ActionModifier.A)) {
+                        this.x -= GameConstants.DASH_DISTANCE;
+                        this.isFacingRight = false;
+                    }
+                    startAction(CharacterFSMState.DASHING, currentTime);
                 }
-                startAction(CharacterFSMState.DASHING, currentTime);
                 break;
             case PUNCH:
-                if (input.modifiers.contains(ActionModifier.W)) startAction(CharacterFSMState.PUNCH_HOOK, currentTime);
-                else if (input.modifiers.contains(ActionModifier.ENTER)) startAction(CharacterFSMState.PUNCH_HEAVY, currentTime);
-                else startAction(CharacterFSMState.PUNCH_NORMAL, currentTime);
+                if (canAfford(GameConstants.PUNCH_STAMINA_COST)){
+                    spendStamina(GameConstants.PUNCH_STAMINA_COST);
+                    if (input.modifiers.contains(ActionModifier.W)) startAction(CharacterFSMState.PUNCH_HOOK, currentTime);
+                    else if (input.modifiers.contains(ActionModifier.ENTER)) startAction(CharacterFSMState.PUNCH_HEAVY, currentTime);
+                    else startAction(CharacterFSMState.PUNCH_NORMAL, currentTime);
+                }
                 break;
             case KICK:
-                if (input.modifiers.contains(ActionModifier.W)) startAction(CharacterFSMState.KICK_HIGH, currentTime);
-                else if (input.modifiers.contains(ActionModifier.S)) startAction(CharacterFSMState.KICK_LOW, currentTime);
-                else startAction(CharacterFSMState.KICK_NORMAL, currentTime);
+                if (canAfford(GameConstants.KICK_STAMINA_COST)){
+                    spendStamina(GameConstants.KICK_STAMINA_COST);
+                    if (input.modifiers.contains(ActionModifier.W)) startAction(CharacterFSMState.KICK_HIGH, currentTime);
+                    else if (input.modifiers.contains(ActionModifier.S)) startAction(CharacterFSMState.KICK_LOW, currentTime);
+                    else startAction(CharacterFSMState.KICK_NORMAL, currentTime);
+                }
                 break;
             case JUMP:
-                if (fsmState == CharacterFSMState.IDLE || fsmState == CharacterFSMState.RUNNING || fsmState == CharacterFSMState.LANDING) {
+                if ((fsmState == CharacterFSMState.IDLE || fsmState == CharacterFSMState.RUNNING) && canAfford(GameConstants.JUMP_STAMINA_COST)) {
+                    spendStamina(GameConstants.JUMP_STAMINA_COST);
                     this.currentVerticalSpeed = GameConstants.JUMP_INITIAL_SPEED;
                     startAction(CharacterFSMState.JUMPING, currentTime);
                 }
@@ -158,7 +194,6 @@ public class StickmanCharacterServer {
                 startAction(CharacterFSMState.CROUCHING, currentTime);
                 break;
             case MOVE:
-
                 if (this.fsmState != CharacterFSMState.RUNNING) {
                     this.currentFrame = -1;
                 }
@@ -172,7 +207,6 @@ public class StickmanCharacterServer {
                 break;
             case IDLE:
             default:
-
                 if (this.fsmState == CharacterFSMState.RUNNING) {
                     setToIdle();
                 }
@@ -238,10 +272,33 @@ public class StickmanCharacterServer {
         this.fsmState = newState;
         this.actionStartTime = currentTime;
         this.currentFrame = -1;
+
+        if (isAttackState(newState)) {
+            this.hitTargetsInCurrentAction.clear();
+        }
     }
 
-    private void startAction(CharacterFSMState newState, long currentTime, long duration) {
-        startAction(newState, currentTime);
+    public boolean hasHitTarget(UUID targetId) {
+        return hitTargetsInCurrentAction.contains(targetId);
+    }
+
+    public void addHitTarget(UUID targetId) {
+        hitTargetsInCurrentAction.add(targetId);
+    }
+
+    private boolean isAttackState(CharacterFSMState state) {
+        switch (state) {
+            case PUNCH_NORMAL:
+            case PUNCH_HOOK:
+            case PUNCH_HEAVY:
+            case KICK_NORMAL:
+            case KICK_AERIAL:
+            case KICK_HIGH:
+            case KICK_LOW:
+                return true;
+            default:
+                return false;
+        }
     }
 
     private void setToIdle() {
@@ -275,7 +332,7 @@ public class StickmanCharacterServer {
     }
 
     public Line2D.Double getActiveHitbox() {
-        if (this.fsmState == CharacterFSMState.PUNCH_NORMAL && (currentFrame >= 1 && currentFrame <= 3)) {
+        if (this.fsmState == CharacterFSMState.PUNCH_NORMAL && (currentFrame >= 2 && currentFrame <= 3)) {
             Point2D.Double startPoint, endPoint;
             if (isFacingRight) {
                 startPoint = skeleton.elbowR;
@@ -287,7 +344,7 @@ public class StickmanCharacterServer {
 
             return new Line2D.Double(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
         }
-        if (this.fsmState == CharacterFSMState.KICK_NORMAL && (currentFrame >= 1 && currentFrame <= 4)) {
+        if (this.fsmState == CharacterFSMState.KICK_NORMAL && (currentFrame >= 3 && currentFrame <= 4)) {
             Point2D.Double startPoint, endPoint;
             if (isFacingRight) {
                 startPoint = skeleton.kneeR;
@@ -301,4 +358,7 @@ public class StickmanCharacterServer {
         }
         return null;
     }
+
+    public double getHealth() { return health; }
+    public double getStamina() { return stamina; }
 }
