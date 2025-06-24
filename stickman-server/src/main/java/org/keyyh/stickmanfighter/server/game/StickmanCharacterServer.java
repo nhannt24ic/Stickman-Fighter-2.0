@@ -97,7 +97,7 @@ public class StickmanCharacterServer {
                 if (isActionFinished(currentTime, 400)) { setToIdle(); }
                 break;
             case KICK_NORMAL:
-                if (isActionFinished(currentTime, 500)) { setToIdle(); }
+                if (isActionFinished(currentTime, 450)) { setToIdle(); }
                 break;
             case DASHING:
                 if (isActionFinished(currentTime, 500)) { setToIdle(); }

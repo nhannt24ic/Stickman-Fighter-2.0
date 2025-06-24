@@ -3,6 +3,7 @@ package org.keyyh.stickmanfighter.client.gui;
 import org.keyyh.stickmanfighter.client.game.StickmanCharacter;
 import org.keyyh.stickmanfighter.common.data.GameStatePacket;
 import org.keyyh.stickmanfighter.common.data.InputPacket;
+import org.keyyh.stickmanfighter.common.game.Skeleton;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -12,13 +13,14 @@ import java.awt.event.ActionListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.geom.Point2D;
+import java.awt.geom.RoundRectangle2D;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import org.keyyh.stickmanfighter.client.network.NetworkClient;
 import org.keyyh.stickmanfighter.common.enums.ActionModifier;
 import org.keyyh.stickmanfighter.common.enums.PlayerAction;
 
-public class GameScreen extends JPanel implements ActionListener {
+public class GameScreen extends JPanel implements ActionListener, NetworkClient.PacketListener {
     private final int screenWidth;
     private final int screenHeight;
     private final int DELAY = 16;
@@ -27,6 +29,8 @@ public class GameScreen extends JPanel implements ActionListener {
     private Timer gameLoopTimer;
     private UUID myPlayerId;
     private long clockOffset = 0;
+
+    // <<< THAY ĐỔI: Không còn các biến mạng trực tiếp ở đây
 
     public GameScreen(int width, int height) {
         this.screenWidth = width;
@@ -37,15 +41,29 @@ public class GameScreen extends JPanel implements ActionListener {
 
     // Hàm mới để khởi tạo game với dữ liệu từ server
     public void startGame(GameStatePacket initialState, UUID myId, long clockOffset) {
+        System.out.println("GameScreen: Starting game...");
         this.myPlayerId = myId;
         this.clockOffset = clockOffset;
+        this.characters.clear(); // Xóa các nhân vật cũ nếu có
         updateCharactersFromServer(initialState);
+
+        NetworkClient.getInstance().addListener(this); // <<< Đăng ký làm người nghe
         startGameLoop();
+    }
+
+    // Hàm để dừng game và dọn dẹp
+    public void stopGame() {
+        if (gameLoopTimer != null) {
+            gameLoopTimer.stop();
+        }
+        NetworkClient.getInstance().removeListener(this); // <<< Hủy đăng ký
+        this.characters.clear();
+        System.out.println("GameScreen: Stopped and cleaned up.");
     }
 
     private void initPanel() {
         setPreferredSize(new Dimension(screenWidth, screenHeight));
-        setBackground(Color.LIGHT_GRAY);
+        setBackground(Color.DARK_GRAY); // Đổi màu nền cho dễ phân biệt
         setFocusable(true);
         addKeyListener(inputHandler);
     }
@@ -57,17 +75,23 @@ public class GameScreen extends JPanel implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent e) {
+        // Gửi input đi qua NetworkClient
         NetworkClient.getInstance().send(inputHandler.getCurrentInputPacket());
+
         long synchronizedServerTime = System.currentTimeMillis() - clockOffset;
         long renderTime = synchronizedServerTime - 100;
         for (StickmanCharacter character : characters.values()) {
-//            if (isMyPlayer(character.getId())) {
-//                character.updateLocalPlayer(inputHandler);
-//            } else {
-                character.interpolate(renderTime);
-//            }
+            character.interpolate(renderTime);
         }
         repaint();
+    }
+
+    // <<< THÊM MỚI: Hàm nhận gói tin của riêng GameScreen
+    @Override
+    public void received(Object packet) {
+        if (packet instanceof GameStatePacket) {
+            updateCharactersFromServer((GameStatePacket) packet);
+        }
     }
 
     private void updateCharactersFromServer(GameStatePacket packet) {
@@ -81,11 +105,7 @@ public class GameScreen extends JPanel implements ActionListener {
                     character = new StickmanCharacter(state.id, state.x, state.y, Color.BLACK, false);
                     characters.put(state.id, character);
                 }
-                if (isMyPlayer(state.id)) {
-                    character.reconcile(state);
-                } else {
-                    character.addState(state, packet.timestamp);
-                }
+                character.addState(state, packet.timestamp);
             }
             characters.keySet().removeIf(id -> !receivedIds.contains(id));
         });
@@ -95,40 +115,85 @@ public class GameScreen extends JPanel implements ActionListener {
         return myPlayerId != null && myPlayerId.equals(characterId);
     }
 
+    private void drawPlayerStatusBar(Graphics2D g2d, double health, double stamina) {
+        int barWidth = 180;
+        int barHeight = 18;
+        int x = 30;
+        int y = 24;
+        int segments = 10;
+        int segmentGap = 2;
+        int segmentWidth = (barWidth - (segments - 1) * segmentGap) / segments;
+        // Health bar
+        g2d.setColor(Color.DARK_GRAY);
+        g2d.fillRoundRect(x, y, barWidth, barHeight, 12, 12);
+        int healthSegments = (int) Math.ceil(Math.max(0, Math.min(1, health / 100.0)) * segments);
+        for (int i = 0; i < healthSegments; i++) {
+            int sx = x + i * (segmentWidth + segmentGap);
+            g2d.setColor(new Color(220, 20, 60));
+            g2d.fillRoundRect(sx, y, segmentWidth, barHeight, 10, 10);
+        }
+        g2d.setColor(Color.BLACK);
+        g2d.drawRoundRect(x, y, barWidth, barHeight, 12, 12);
+        g2d.setFont(new Font("Arial", Font.BOLD, 14));
+        g2d.setColor(Color.WHITE);
+        g2d.drawString("HP", x + 8, y + 14);
+        g2d.drawString(String.valueOf((int) health), x + barWidth + 16, y + 14);
+        // Stamina bar
+        int y2 = y + barHeight + 8;
+        g2d.setColor(Color.DARK_GRAY);
+        g2d.fillRoundRect(x, y2, barWidth, barHeight, 12, 12);
+        int staminaSegments = (int) Math.ceil(Math.max(0, Math.min(1, stamina / 100.0)) * segments);
+        for (int i = 0; i < staminaSegments; i++) {
+            int sx = x + i * (segmentWidth + segmentGap);
+            g2d.setColor(new Color(30, 144, 255));
+            g2d.fillRoundRect(sx, y2, segmentWidth, barHeight, 10, 10);
+        }
+        g2d.setColor(Color.BLACK);
+        g2d.drawRoundRect(x, y2, barWidth, barHeight, 12, 12);
+        g2d.setFont(new Font("Arial", Font.BOLD, 14));
+        g2d.setColor(Color.WHITE);
+        g2d.drawString("ST", x + 8, y2 + 14);
+        g2d.drawString(String.valueOf((int) stamina), x + barWidth + 16, y2 + 14);
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        // Gradient background
+        GradientPaint gp = new GradientPaint(0, 0, new Color(135, 206, 250), 0, getHeight(), new Color(255, 255, 255));
+        g2d.setPaint(gp);
+        g2d.fillRect(0, 0, getWidth(), getHeight());
+
+        // Draw play area border
+        int borderMargin = 30;
+        int borderRadius = 30;
+        g2d.setColor(new Color(60, 60, 60, 180));
+        g2d.setStroke(new BasicStroke(4f));
+        g2d.draw(new RoundRectangle2D.Double(borderMargin, borderMargin, getWidth() - 2 * borderMargin, getHeight() - 2 * borderMargin, borderRadius, borderRadius));
+
+        StickmanCharacter localChar = null;
         for (StickmanCharacter c : characters.values()) {
-            c.draw(g2d);
-
-            if (isMyPlayer(c.getId())) {
-                Point2D.Double headCenter = c.getHeadCenter();
-                double headRadius = c.getHeadRadius();
-                boolean facingRight = c.isFacingRight();
-
-                if (headCenter != null) {
-                    final int ARROW_CENTER_Y = (int) (headCenter.y - headRadius) - 15;
-                    final int ARROW_CENTER_X = (int) headCenter.x;
-                    final int BASE_HALF = 7;
-                    final int TOP_HALF = 12;
-                    final int BOTTOM_HALF = 10;
-                    int[] xPoints = new int[3];
-                    int[] yPoints = new int[3];
-                    if (facingRight) {
-                        xPoints[0] = ARROW_CENTER_X + TOP_HALF; yPoints[0] = ARROW_CENTER_Y;
-                        xPoints[1] = ARROW_CENTER_X - BOTTOM_HALF ; yPoints[1] = ARROW_CENTER_Y - BASE_HALF;
-                        xPoints[2] = ARROW_CENTER_X - BOTTOM_HALF ; yPoints[2] = ARROW_CENTER_Y + BASE_HALF;
-                    } else {
-                        xPoints[0] = ARROW_CENTER_X - TOP_HALF; yPoints[0] = ARROW_CENTER_Y;
-                        xPoints[1] = ARROW_CENTER_X + BOTTOM_HALF ; yPoints[1] = ARROW_CENTER_Y - BASE_HALF;
-                        xPoints[2] = ARROW_CENTER_X + BOTTOM_HALF ; yPoints[2] = ARROW_CENTER_Y + BASE_HALF;
-                    }
-                    g2d.setColor(Color.GREEN);
-                    g2d.fillPolygon(xPoints, yPoints, 3);
+            boolean isLocal = isMyPlayer(c.getId());
+            // Highlight local player
+            if (isLocal) {
+                g2d.setStroke(new BasicStroke(8f));
+                g2d.setColor(new Color(0, 255, 127, 120));
+                Point2D.Double head = c.getHeadCenter();
+                if (head != null) {
+                    double r = c.getHeadRadius() + 20;
+                    g2d.drawOval((int) (head.x - r), (int) (head.y - r), (int) (2 * r), (int) (2 * r));
                 }
+                localChar = c;
             }
+            // Draw character
+            c.draw(g2d);
+        }
+        // Draw local player status bar
+        if (localChar != null) {
+            drawPlayerStatusBar(g2d, localChar.getHealth(), localChar.getStamina());
         }
     }
 

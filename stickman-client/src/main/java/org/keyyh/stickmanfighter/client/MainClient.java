@@ -7,7 +7,6 @@ import org.keyyh.stickmanfighter.common.data.ConnectionResponsePacket;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.UUID;
 
 public class MainClient implements NetworkClient.PacketListener {
     public static final int WINDOW_WIDTH = 1400;
@@ -20,13 +19,13 @@ public class MainClient implements NetworkClient.PacketListener {
     private LobbyScreen lobbyScreen;
 
     public MainClient() {
-        NetworkClient.getInstance().start(); // Khởi động mạng
-        NetworkClient.getInstance().addListener(this); // Đăng ký lắng nghe gói tin
+        NetworkClient.getInstance().start();
+        NetworkClient.getInstance().addListener(this); // MainClient lắng nghe các gói tin toàn cục
 
         EventQueue.invokeLater(() -> {
             frame = new JFrame("Stickman Fighter");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-
+            frame.setResizable(false);
             cardLayout = new CardLayout();
             mainPanel = new JPanel(cardLayout);
 
@@ -41,41 +40,43 @@ public class MainClient implements NetworkClient.PacketListener {
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);
 
-            showScreen("LOBBY");
+            showScreen("LOBBY"); // Bắt đầu ở màn hình Lobby
         });
     }
 
     public void showScreen(String screenName) {
         cardLayout.show(mainPanel, screenName);
+
+        // Kích hoạt listener cho màn hình mới và vô hiệu hóa listener của màn hình cũ
         if ("GAME".equals(screenName)) {
+            lobbyScreen.onBecameHidden(); // Lobby ngừng lắng nghe
             gameScreen.requestFocusInWindow();
-        } else {
+        } else { // LOBBY
+            gameScreen.stopGame(); // Game ngừng lắng nghe và dọn dẹp
+            lobbyScreen.onBecameVisible(); // Lobby bắt đầu lắng nghe
             lobbyScreen.requestFocusInWindow();
         }
     }
 
+    // <<< THAY ĐỔI: Hàm received của MainClient giờ chỉ xử lý gói tin báo bắt đầu game
     @Override
     public void received(Object packet) {
         if (packet instanceof ConnectionResponsePacket) {
-            ConnectionResponsePacket response = (ConnectionResponsePacket) packet;
-            System.out.println("GameStart signal received! My ID: " + response.yourPlayerId);
+            SwingUtilities.invokeLater(() -> {
+                ConnectionResponsePacket response = (ConnectionResponsePacket) packet;
+                System.out.println("Match found signal received! My ID is: " + response.yourPlayerId);
 
-            // Xóa listener của LobbyScreen để nó không xử lý gói tin game
-            lobbyScreen.onBecameHidden();
+                // Tính toán clock offset
+                long clientTime = System.currentTimeMillis();
+                long serverTime = response.initialGameState.timestamp;
+                long clockOffset = clientTime - serverTime;
 
-            // Tính toán clock offset
-            long clientTime = System.currentTimeMillis();
-            long serverTime = response.initialGameState.timestamp;
-            long clockOffset = clientTime - serverTime;
-
-            // Khởi tạo và chuyển sang màn hình chơi game
-            gameScreen.startGame(response.initialGameState, response.yourPlayerId, clockOffset);
-            showScreen("GAME");
+                // Khởi tạo và chuyển sang màn hình chơi game
+                gameScreen.startGame(response.initialGameState, response.yourPlayerId, clockOffset);
+                showScreen("GAME");
+            });
         }
     }
-
-    private UUID myPlayerId;
-    private long clockOffset;
 
     public static void main(String[] args) {
         new MainClient();

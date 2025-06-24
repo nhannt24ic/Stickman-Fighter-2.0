@@ -6,7 +6,7 @@ import org.keyyh.stickmanfighter.common.data.CharacterState;
 import org.keyyh.stickmanfighter.common.data.GameStatePacket;
 import org.keyyh.stickmanfighter.common.data.InputPacket;
 import org.keyyh.stickmanfighter.common.enums.PlayerAction;
-import org.keyyh.stickmanfighter.common.network.responses.RoomInfo;
+import org.keyyh.stickmanfighter.common.game.GameConstants;
 import org.keyyh.stickmanfighter.server.game.StickmanCharacterServer;
 
 import java.awt.*;
@@ -24,7 +24,6 @@ public class GameRoom implements Runnable {
     public final UUID roomId;
     public final String roomName;
 
-    // Quản lý 2 người chơi trong phòng này
     private final Map<SocketAddress, StickmanCharacterServer> players = new ConcurrentHashMap<>();
     private final Map<SocketAddress, UUID> addressToIdMap = new ConcurrentHashMap<>();
     private final Map<UUID, SocketAddress> idToAddressMap = new ConcurrentHashMap<>();
@@ -32,7 +31,7 @@ public class GameRoom implements Runnable {
 
     private final DatagramSocket socket;
     private final Kryo kryo;
-    private final Consumer<UUID> onRoomFinished; // Callback để báo cho GameServer biết khi phòng kết thúc
+    private final Consumer<UUID> onRoomFinished;
 
     private volatile boolean isRunning = false;
 
@@ -50,8 +49,8 @@ public class GameRoom implements Runnable {
     public void addPlayer(SocketAddress clientAddress, UUID playerId) {
         if (isFull()) return;
 
-        double startX = players.isEmpty() ? 200 : 1200;
-        StickmanCharacterServer newPlayer = new StickmanCharacterServer(playerId, startX, 450);
+        double startX = players.isEmpty() ? 300 : 1100;
+        StickmanCharacterServer newPlayer = new StickmanCharacterServer(playerId, startX, GameConstants.GROUND_LEVEL);
 
         players.put(clientAddress, newPlayer);
         addressToIdMap.put(clientAddress, playerId);
@@ -61,9 +60,7 @@ public class GameRoom implements Runnable {
     }
 
     public void processInput(SocketAddress clientAddress, InputPacket input) {
-        // Chỉ cần lưu lại input cuối cùng, game loop sẽ xử lý
         lastInputs.put(clientAddress, input);
-
         StickmanCharacterServer character = players.get(clientAddress);
         if (character != null) {
             character.lastUpdateTime = System.currentTimeMillis();
@@ -80,19 +77,19 @@ public class GameRoom implements Runnable {
                 int loops = 0;
                 while (System.currentTimeMillis() > nextGameTick && loops < 5) {
                     updateGameLogic(System.currentTimeMillis());
-                    checkCollisions();
+                    checkCollisions(); // <<< GIỜ ĐÃ CÓ LOGIC
                     nextGameTick += MS_PER_TICK;
                     loops++;
                 }
                 broadcastGameState();
-                Thread.sleep(16); // Nghỉ giữa các vòng lặp để giảm tải CPU
+                Thread.sleep(16);
             } catch (Exception e) {
                 e.printStackTrace();
-                isRunning = false; // Dừng vòng lặp nếu có lỗi nghiêm trọng
+                isRunning = false;
             }
         }
         System.out.println("GameRoom " + roomName + " has stopped.");
-        onRoomFinished.accept(this.roomId); // Báo cho GameServer để xóa phòng này
+        onRoomFinished.accept(this.roomId);
     }
 
     private void updateGameLogic(long currentTime) {
@@ -103,14 +100,12 @@ public class GameRoom implements Runnable {
             if (lastInput != null) {
                 character.update(lastInput, currentTime);
             } else {
-                // Nếu chưa từng có input nào, dùng input mặc định
                 character.update(new InputPacket(PlayerAction.IDLE, Collections.emptySet()), currentTime);
             }
         }
     }
 
     private void checkCollisions() {
-        // Logic này giống hệt như trong GameServer cũ
         if (players.size() < 2) return;
         List<StickmanCharacterServer> playerList = new ArrayList<>(players.values());
         StickmanCharacterServer playerA = playerList.get(0);
@@ -120,19 +115,46 @@ public class GameRoom implements Runnable {
     }
 
     private void checkAttack(StickmanCharacterServer attacker, StickmanCharacterServer defender) {
-        // Logic này giống hệt như trong GameServer cũ
+        Shape hitboxShape = attacker.getActiveHitbox();
+        if (hitboxShape == null) return;
+        if (attacker.hasHitTarget(defender.id)) return;
+
+        double damage = 0;
+        switch (attacker.fsmState) {
+            case PUNCH_NORMAL: case PUNCH_HOOK: case PUNCH_HEAVY:
+                damage = GameConstants.PUNCH_DAMAGE;
+                break;
+            case KICK_NORMAL: case KICK_AERIAL: case KICK_HIGH: case KICK_LOW:
+                damage = GameConstants.KICK_DAMAGE;
+                break;
+        }
+
+        if (damage > 0) {
+            BasicStroke stroke = new BasicStroke(6.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+            Shape thickHitbox = stroke.createStrokedShape(hitboxShape);
+            Area hitboxArea = new Area(thickHitbox);
+
+            for (Shape hurtbox : defender.getHurtboxes()) {
+                Area hurtboxArea = new Area(hurtbox);
+                hurtboxArea.intersect(hitboxArea);
+                if (!hurtboxArea.isEmpty()) {
+                    System.out.printf("HIT! Player %s dealt %.1f damage to Player %s%n", attacker.id, damage, defender.id);
+                    defender.takeDamage(damage);
+                    attacker.addHitTarget(defender.id);
+                    break;
+                }
+            }
+        }
     }
 
     private void broadcastGameState() throws Exception {
         if (players.isEmpty()) return;
-
         GameStatePacket gameStatePacket = createCurrentGameState();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         Output output = new Output(baos);
         kryo.writeClassAndObject(output, gameStatePacket);
         output.close();
         byte[] sendBuffer = baos.toByteArray();
-
         for (SocketAddress clientAddr : players.keySet()) {
             DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, clientAddr);
             socket.send(sendPacket);
@@ -146,8 +168,7 @@ public class GameRoom implements Runnable {
                     serverCharacter.id, serverCharacter.x, serverCharacter.y,
                     serverCharacter.getCurrentPose(), serverCharacter.isFacingRight,
                     serverCharacter.fsmState, serverCharacter.getActiveHitbox(),
-                    serverCharacter.getHealth(), serverCharacter.getStamina()
-            );
+                    serverCharacter.getHealth(), serverCharacter.getStamina());
             currentStates.add(state);
         }
         return new GameStatePacket(currentStates, System.currentTimeMillis());
@@ -157,8 +178,5 @@ public class GameRoom implements Runnable {
     public Set<SocketAddress> getPlayerAddresses() { return players.keySet(); }
     public Map<UUID, SocketAddress> getPlayerIdAddressMap() { return idToAddressMap; }
     public UUID getPlayerIdByAddress(SocketAddress address) { return addressToIdMap.get(address); }
-    public RoomInfo getRoomInfo() {
-        return new RoomInfo(this.roomId, this.roomName, this.players.size());
-    }
     public boolean isRunning() { return isRunning; }
 }
