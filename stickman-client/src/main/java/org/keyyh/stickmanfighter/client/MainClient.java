@@ -2,11 +2,14 @@ package org.keyyh.stickmanfighter.client;
 
 import org.keyyh.stickmanfighter.client.gui.GameScreen;
 import org.keyyh.stickmanfighter.client.gui.LobbyScreen;
+import org.keyyh.stickmanfighter.client.gui.LoginView;
 import org.keyyh.stickmanfighter.client.network.NetworkClient;
+import org.keyyh.stickmanfighter.client.service.NetworkService;
 import org.keyyh.stickmanfighter.common.data.ConnectionResponsePacket;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.IOException;
 
 public class MainClient implements NetworkClient.PacketListener {
     public static final int WINDOW_WIDTH = 1400;
@@ -18,9 +21,13 @@ public class MainClient implements NetworkClient.PacketListener {
     private GameScreen gameScreen;
     private LobbyScreen lobbyScreen;
 
+    public NetworkService networkService;
+
     public MainClient() {
         NetworkClient.getInstance().start();
-        NetworkClient.getInstance().addListener(this); // MainClient lắng nghe các gói tin toàn cục
+        NetworkClient.getInstance().addListener(this);
+
+        networkService = new NetworkService();
 
         EventQueue.invokeLater(() -> {
             frame = new JFrame("Stickman Fighter");
@@ -79,6 +86,31 @@ public class MainClient implements NetworkClient.PacketListener {
     }
 
     public static void main(String[] args) {
-        new MainClient();
+        // Luôn khởi tạo giao diện Swing trên Event Dispatch Thread (EDT)
+        SwingUtilities.invokeLater(() -> {
+            NetworkService networkService = new NetworkService();
+            try {
+                // Cố gắng kết nối đến server trước khi hiển thị giao diện
+                networkService.connect("localhost", 7070);
+
+                // Nếu kết nối thành công, hiển thị cửa sổ đăng nhập
+                LoginView loginView = new LoginView(networkService);
+                loginView.setVisible(true);
+
+                // Thêm một shutdown hook để đảm bảo ngắt kết nối khi app tắt
+                Runtime.getRuntime().addShutdownHook(new Thread(networkService::disconnect));
+
+            } catch (IOException e) {
+                // Nếu kết nối thất bại, hiển thị thông báo lỗi và thoát
+                JOptionPane.showMessageDialog(null,
+                        "Không thể kết nối đến máy chủ game.\nHãy chắc chắn rằng server đang chạy.",
+                        "Lỗi Kết Nối",
+                        JOptionPane.ERROR_MESSAGE);
+                System.exit(1); // Thoát ứng dụng
+            }
+        });
+
+//        new MainClient();
+
     }
 }
