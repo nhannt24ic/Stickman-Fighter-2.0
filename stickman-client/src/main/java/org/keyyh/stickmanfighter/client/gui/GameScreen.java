@@ -30,8 +30,6 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
     private UUID myPlayerId;
     private long clockOffset = 0;
 
-    // <<< THAY ĐỔI: Không còn các biến mạng trực tiếp ở đây
-
     public GameScreen(int width, int height) {
         this.screenWidth = width;
         this.screenHeight = height;
@@ -39,24 +37,22 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
         initPanel();
     }
 
-    // Hàm mới để khởi tạo game với dữ liệu từ server
     public void startGame(GameStatePacket initialState, UUID myId, long clockOffset) {
         System.out.println("GameScreen: Starting game...");
         this.myPlayerId = myId;
         this.clockOffset = clockOffset;
-        this.characters.clear(); // Xóa các nhân vật cũ nếu có
+        this.characters.clear();
         updateCharactersFromServer(initialState);
 
-        NetworkClient.getInstance().addListener(this); // <<< Đăng ký làm người nghe
+        NetworkClient.getInstance().addListener(this);
         startGameLoop();
     }
 
-    // Hàm để dừng game và dọn dẹp
     public void stopGame() {
         if (gameLoopTimer != null) {
             gameLoopTimer.stop();
         }
-        NetworkClient.getInstance().removeListener(this); // <<< Hủy đăng ký
+        NetworkClient.getInstance().removeListener(this);
         this.characters.clear();
         System.out.println("GameScreen: Stopped and cleaned up.");
     }
@@ -86,7 +82,6 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
         repaint();
     }
 
-    // <<< THÊM MỚI: Hàm nhận gói tin của riêng GameScreen
     @Override
     public void received(Object packet) {
         if (packet instanceof GameStatePacket) {
@@ -123,7 +118,7 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
         int segments = 10;
         int segmentGap = 2;
         int segmentWidth = (barWidth - (segments - 1) * segmentGap) / segments;
-        // Health bar
+
         g2d.setColor(Color.DARK_GRAY);
         g2d.fillRoundRect(x, y, barWidth, barHeight, 12, 12);
         int healthSegments = (int) Math.ceil(Math.max(0, Math.min(1, health / 100.0)) * segments);
@@ -138,7 +133,7 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
         g2d.setColor(Color.WHITE);
         g2d.drawString("HP", x + 8, y + 14);
         g2d.drawString(String.valueOf((int) health), x + barWidth + 16, y + 14);
-        // Stamina bar
+
         int y2 = y + barHeight + 8;
         g2d.setColor(Color.DARK_GRAY);
         g2d.fillRoundRect(x, y2, barWidth, barHeight, 12, 12);

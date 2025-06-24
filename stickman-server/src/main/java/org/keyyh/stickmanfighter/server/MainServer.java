@@ -9,6 +9,7 @@ import org.keyyh.stickmanfighter.server.util.HibernateUtil;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import javax.swing.SwingUtilities;
 
 public class MainServer {
     private static final int PORT = 7070; // Cổng server sẽ lắng nghe

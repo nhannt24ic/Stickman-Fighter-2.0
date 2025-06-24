@@ -121,6 +121,11 @@ public class LoginView extends JFrame {
             String[] parts = response.split(",");
             String displayName = parts.length > 1 ? parts[1] : "người dùng";
             showMessage("Đăng nhập thành công! Chào mừng " + displayName, new Color(0, 128, 0));
+            // Sau khi đăng nhập thành công, khởi tạo MainClient và đóng LoginView
+            SwingUtilities.invokeLater(() -> {
+                this.dispose();
+                new org.keyyh.stickmanfighter.client.MainClient();
+            });
         } else if (response.startsWith("LOGIN_ERROR")) {
             String errorReason = response.substring(response.indexOf(":") + 1);
             showMessage("Lỗi đăng nhập: " + errorReason, Color.RED);
