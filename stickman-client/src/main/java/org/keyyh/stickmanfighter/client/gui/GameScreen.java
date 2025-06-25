@@ -29,6 +29,9 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
     private Timer gameLoopTimer;
     private UUID myPlayerId;
     private long clockOffset = 0;
+    private boolean gameEnded = false;
+    private Timer endGameTimer;
+    private String endMessage = null;
 
     public GameScreen(int width, int height) {
         this.screenWidth = width;
@@ -71,15 +74,47 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
 
     @Override
     public void actionPerformed(ActionEvent e) {
-        // Gửi input đi qua NetworkClient
-        NetworkClient.getInstance().send(inputHandler.getCurrentInputPacket());
-
+        if (gameEnded) return;
+        if (myPlayerId != null && characters.size() == 2) {
+            // Gửi input của người chơi lên server
+            NetworkClient.getInstance().send(inputHandler.getCurrentInputPacket());
+            // Kiểm tra máu của cả hai người chơi
+            StickmanCharacter local = characters.get(myPlayerId);
+            StickmanCharacter opponent = null;
+            for (UUID id : characters.keySet()) {
+                if (!id.equals(myPlayerId)) {
+                    opponent = characters.get(id);
+                    break;
+                }
+            }
+            if (local != null && opponent != null && !gameEnded) {
+                if (local.getHealth() <= 0 || opponent.getHealth() <= 0) {
+                    gameEnded = true;
+                    if (local.getHealth() > 0) endMessage = "YOU WIN!";
+                    else if (opponent.getHealth() > 0) endMessage = "YOU LOST!";
+                    else endMessage = "DRAW!";
+                    repaint();
+                    endGameTimer = new Timer(10000, evt -> forceBackToLobby());
+                    endGameTimer.setRepeats(false);
+                    endGameTimer.start();
+                }
+            }
+        }
         long synchronizedServerTime = System.currentTimeMillis() - clockOffset;
         long renderTime = synchronizedServerTime - 100;
         for (StickmanCharacter character : characters.values()) {
             character.interpolate(renderTime);
         }
         repaint();
+    }
+
+    private void forceBackToLobby() {
+        if (endGameTimer != null) endGameTimer.stop();
+        JFrame topFrame = (JFrame) SwingUtilities.getWindowAncestor(this);
+        if (topFrame != null) {
+            topFrame.dispose();
+            new org.keyyh.stickmanfighter.client.MainClient();
+        }
     }
 
     @Override
@@ -189,6 +224,15 @@ public class GameScreen extends JPanel implements ActionListener, NetworkClient.
         // Draw local player status bar
         if (localChar != null) {
             drawPlayerStatusBar(g2d, localChar.getHealth(), localChar.getStamina());
+        }
+        if (endMessage != null) {
+            g2d.setFont(new Font("Arial", Font.BOLD, 64));
+            g2d.setColor(new Color(255, 215, 0));
+            FontMetrics fm = g2d.getFontMetrics();
+            int msgWidth = fm.stringWidth(endMessage);
+            int x = (getWidth() - msgWidth) / 2;
+            int y = getHeight() / 2;
+            g2d.drawString(endMessage, x, y);
         }
     }
 
