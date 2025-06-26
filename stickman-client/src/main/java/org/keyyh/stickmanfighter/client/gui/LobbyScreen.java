@@ -7,7 +7,6 @@ import org.keyyh.stickmanfighter.common.network.requests.FindMatchRequest;
 import javax.swing.*;
 import java.awt.*;
 
-// <<< THAY ĐỔI: Implement PacketListener để có thể nhận gói tin mạng
 public class LobbyScreen extends JPanel implements NetworkClient.PacketListener {
 
     private final JButton findMatchButton;
@@ -38,25 +37,17 @@ public class LobbyScreen extends JPanel implements NetworkClient.PacketListener 
         });
     }
 
-    // <<< THÊM MỚI: Được gọi bởi MainClient khi màn hình này hiển thị
     public void onBecameVisible() {
-        // Đăng ký làm người nghe gói tin
         NetworkClient.getInstance().addListener(this);
-        // Reset lại trạng thái các nút
         reset();
     }
 
-    // <<< THÊM MỚI: Được gọi bởi MainClient khi chuyển sang màn hình khác
     public void onBecameHidden() {
-        // Hủy đăng ký để không nhận các gói tin không liên quan (như GameStatePacket)
         NetworkClient.getInstance().removeListener(this);
     }
 
-    // <<< THÊM MỚI: Xử lý các gói tin nhận được dành cho màn hình này
     @Override
     public void received(Object packet) {
-        // Hiện tại LobbyScreen không cần nhận gói tin nào đặc biệt
-        // Nhưng chúng ta có thể thêm logic ở đây sau, ví dụ: "Tìm thấy đối thủ..."
     }
 
     public void reset() {

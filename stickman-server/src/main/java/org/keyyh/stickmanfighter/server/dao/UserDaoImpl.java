@@ -99,10 +99,9 @@ public class UserDaoImpl implements UserDAO {
     @Override
     public User findByEmail(String email) {
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
-            // Sử dụng HQL (Hibernate Query Language)
             Query<User> query = session.createQuery("from User where email = :email", User.class);
             query.setParameter("email", email);
-            return query.uniqueResult(); // uniqueResult sẽ trả về null nếu không tìm thấy
+            return query.uniqueResult();
         } catch (Exception e) {
             e.printStackTrace();
             return null;

@@ -74,7 +74,6 @@ public class ClientHandler implements Runnable {
 
         LoginResponse response = userService.login(params[0], params[1]);
         if (response.getStatus() == LoginStatus.SUCCESS) {
-            // Gửi về thông tin user để client hiển thị
             return "LOGIN_SUCCESS," + response.getUser().getDisplayName() + "," + response.getUser().getRankingScore();
         } else {
             return "LOGIN_ERROR:" + response.getStatus().toString();

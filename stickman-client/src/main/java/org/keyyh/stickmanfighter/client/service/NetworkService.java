@@ -13,7 +13,6 @@ public class NetworkService {
     private BufferedReader reader;
     private boolean isConnected = false;
 
-    // Phương thức connect() giữ nguyên
     public void connect(String host, int port) throws IOException {
         try {
             socket = new Socket(host, port);
@@ -30,7 +29,6 @@ public class NetworkService {
         }
     }
 
-    // Phương thức sendRequest() giữ nguyên
     public String sendRequest(String request) {
         if (!isConnected) {
             return "ERROR:NOT_CONNECTED";
@@ -48,7 +46,6 @@ public class NetworkService {
         }
     }
 
-    // Phương thức disconnect() giữ nguyên
     public void disconnect() {
         isConnected = false;
         try {

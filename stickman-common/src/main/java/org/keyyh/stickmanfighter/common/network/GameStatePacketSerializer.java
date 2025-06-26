@@ -14,10 +14,8 @@ public class GameStatePacketSerializer extends Serializer<GameStatePacket> {
     public void write(Kryo kryo, Output output, GameStatePacket packet) {
         output.writeLong(packet.timestamp);
 
-        // Ghi số lượng người chơi để biết cần đọc bao nhiêu lần
         output.writeInt(packet.players.size());
 
-        // Dùng kryo để ghi từng đối tượng CharacterState một
         for (CharacterState state : packet.players) {
             kryo.writeObject(output, state);
         }
@@ -32,7 +30,6 @@ public class GameStatePacketSerializer extends Serializer<GameStatePacket> {
         packet.players = new ArrayList<>(playerCount);
 
         for (int i = 0; i < playerCount; i++) {
-            // Dùng kryo để đọc từng đối tượng CharacterState
             packet.players.add(kryo.readObject(input, CharacterState.class));
         }
 

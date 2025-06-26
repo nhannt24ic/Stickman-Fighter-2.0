@@ -22,7 +22,6 @@ public class LoginView extends JFrame {
 
         initializeUI();
 
-        // Thêm listener để ngắt kết nối khi tắt app
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent windowEvent) {
@@ -37,21 +36,18 @@ public class LoginView extends JFrame {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
 
-        // Username
         gbc.gridx = 0; gbc.gridy = 0;
         panel.add(new JLabel("Tên đăng nhập:"), gbc);
         gbc.gridx = 1;
         usernameField = new JTextField(20);
         panel.add(usernameField, gbc);
 
-        // Password
         gbc.gridx = 0; gbc.gridy = 1;
         panel.add(new JLabel("Mật khẩu:"), gbc);
         gbc.gridx = 1;
         passwordField = new JPasswordField(20);
         panel.add(passwordField, gbc);
 
-        // Các nút
         JPanel buttonPanel = new JPanel();
         loginButton = new JButton("Đăng nhập");
         registerButton = new JButton("Đăng ký");
@@ -60,7 +56,6 @@ public class LoginView extends JFrame {
         gbc.gridx = 1; gbc.gridy = 2;
         panel.add(buttonPanel, gbc);
 
-        // Nhãn thông báo
         gbc.gridwidth = 2;
         gbc.gridx = 0; gbc.gridy = 3;
         messageLabel = new JLabel(" ", SwingConstants.CENTER);
@@ -74,16 +69,13 @@ public class LoginView extends JFrame {
         loginButton.addActionListener(e -> handleLogin());
         passwordField.addActionListener(e -> handleLogin());
 
-        // ** THAY ĐỔI QUAN TRỌNG Ở ĐÂY **
-        // Sự kiện khi nhấn nút Đăng ký
         registerButton.addActionListener(e -> {
-            // Tạo và hiển thị cửa sổ đăng ký
+
             RegisterView registerView = new RegisterView(LoginView.this, networkService);
             registerView.setVisible(true);
         });
     }
 
-    // Các phương thức handleLogin, processLoginResponse, showMessage, setUIEnabled giữ nguyên...
     private void handleLogin() {
         String username = usernameField.getText();
         String password = new String(passwordField.getPassword());
@@ -121,7 +113,7 @@ public class LoginView extends JFrame {
             String[] parts = response.split(",");
             String displayName = parts.length > 1 ? parts[1] : "người dùng";
             showMessage("Đăng nhập thành công! Chào mừng " + displayName, new Color(0, 128, 0));
-            // Sau khi đăng nhập thành công, khởi tạo MainClient và đóng LoginView
+
             SwingUtilities.invokeLater(() -> {
                 this.dispose();
                 new org.keyyh.stickmanfighter.client.MainClient();

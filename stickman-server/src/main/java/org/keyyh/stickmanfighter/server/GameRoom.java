@@ -77,7 +77,7 @@ public class GameRoom implements Runnable {
                 int loops = 0;
                 while (System.currentTimeMillis() > nextGameTick && loops < 5) {
                     updateGameLogic(System.currentTimeMillis());
-                    checkCollisions(); // <<< GIỜ ĐÃ CÓ LOGIC
+                    checkCollisions();
                     nextGameTick += MS_PER_TICK;
                     loops++;
                 }

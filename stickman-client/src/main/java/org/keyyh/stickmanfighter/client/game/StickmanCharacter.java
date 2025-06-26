@@ -27,27 +27,23 @@ public class StickmanCharacter {
     // --- Trạng thái ---
     public double rootX, rootY;
     private boolean isFacingRight;
-    private Pose currentPose; // Tư thế hiện tại, LUÔN được cập nhật từ server
+    private Pose currentPose;
     private Shape activeHitbox;
     private double health;
     private double stamina;
 
-    // --- Các biến chỉ dùng cho dự đoán vật lý ở Client ---
-    private boolean isJumping = false;
+    // private boolean isJumping = false;
     private double currentVerticalSpeed = 0;
 
-    // --- Các biến chỉ dùng cho nội suy ở Client ---
     private double startX, startY, targetX, targetY;
     private long startTime, targetTime;
 
-    // --- Thành phần phụ ---
     private final Skeleton skeleton = new Skeleton();
 
-    // --- Biến FSM và animation (đồng bộ với server) ---
     private CharacterFSMState fsmState;
-    private int currentFrame;
+    // private int currentFrame;
     private long actionStartTime;
-    private long lastFrameTime;
+    // private long lastFrameTime;
 
     public StickmanCharacter(UUID id, double rootX, double rootY, Color characterColor, boolean isAI) {
         this.id = id;
@@ -63,20 +59,12 @@ public class StickmanCharacter {
         this.startY = this.targetY = rootY;
         this.startTime = this.targetTime = System.currentTimeMillis();
 
-        // Khởi tạo bộ xương với tư thế nghỉ ban đầu
         this.currentPose = new Pose(0, 0, 125, -10, 55, 10, 115, -5, 65, 5);
         this.skeleton.updatePointsFromPose(this.rootX, this.rootY, this.currentPose);
 
-        // Khởi tạo FSM và animation
         this.fsmState = CharacterFSMState.IDLE;
-        this.currentFrame = 0;
         this.actionStartTime = System.currentTimeMillis();
-        this.lastFrameTime = this.actionStartTime;
     }
-
-    // =================================================================================
-    // LOGIC CHÍNH: DỰ ĐOÁN, NỘI SUY, HÒA GIẢI
-    // =================================================================================
 
     public void updateLocalPlayer(GameScreen.InputHandler inputHandler) {
         InputPacket input = inputHandler.getCurrentInputPacket();
@@ -153,7 +141,6 @@ public class StickmanCharacter {
                 break;
             case MOVE:
                 if (this.fsmState != CharacterFSMState.RUNNING) {
-                    this.currentFrame = -1;
                 }
                 this.fsmState = CharacterFSMState.RUNNING;
                 if (input.modifiers.contains(ActionModifier.A)) {
@@ -204,31 +191,26 @@ public class StickmanCharacter {
     private void startAction(CharacterFSMState newState, long currentTime) {
         this.fsmState = newState;
         this.actionStartTime = currentTime;
-        this.currentFrame = -1;
     }
 
     private void setToIdle() {
         this.fsmState = CharacterFSMState.IDLE;
-        this.currentFrame = -1;
     }
 
     private boolean isActionFinished(long currentTime, long duration) {
         return currentTime - actionStartTime > duration;
     }
 
-    private void updateAnimation(long currentTime) {
-        // Tạm thời chỉ cập nhật pose mặc định, sẽ hoàn thiện sau khi đồng bộ animation list
-        this.currentPose = this.currentPose; // placeholder
-    }
+    // private void updateAnimation(long currentTime) {
+    //     this.currentPose = this.currentPose;
+    // }
 
     public void reconcile(CharacterState serverState) {
-        // Cập nhật các chỉ số và trạng thái mà client không dự đoán
         this.health = serverState.health;
         this.stamina = serverState.stamina;
         this.activeHitbox = serverState.activeHitbox;
 
-        // Đặt vị trí của server làm "đích" nội suy mới để làm mượt các sai khác
-        this.startX = this.rootX; // Bắt đầu từ vị trí dự đoán hiện tại
+        this.startX = this.rootX;
         this.startY = this.rootY;
         this.startTime = System.currentTimeMillis();
 
@@ -236,7 +218,6 @@ public class StickmanCharacter {
         this.targetY = serverState.y;
         this.targetTime = this.startTime + 100;
 
-        // Cập nhật tư thế và hướng mặt ngay lập tức theo server
         this.currentPose = serverState.currentPose;
         this.isFacingRight = serverState.isFacingRight;
 
@@ -264,7 +245,6 @@ public class StickmanCharacter {
         this.stamina = newState.stamina;
         this.currentPose = newState.currentPose;
 
-        // Cập nhật FSM và animation frame
         this.fsmState = newState.fsmState;
         // this.currentFrame = newState.currentFrame;
         // this.actionStartTime = newState.actionStartTime;
@@ -283,10 +263,6 @@ public class StickmanCharacter {
         }
         skeleton.updatePointsFromPose(this.rootX, this.rootY, this.currentPose);
     }
-
-    // =================================================================================
-    // CÁC HÀM HIỂN THỊ VÀ GETTER
-    // =================================================================================
 
     public void draw(Graphics2D g2d) {
         g2d.setColor(this.characterColor != null ? this.characterColor : Color.BLACK);

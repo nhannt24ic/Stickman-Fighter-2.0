@@ -12,7 +12,7 @@ import java.net.Socket;
 import javax.swing.SwingUtilities;
 
 public class MainServer {
-    private static final int PORT = 7070; // Cổng server sẽ lắng nghe
+    private static final int PORT = 7070;
 
     public static void main(String[] args) {
         UserDAO userDao = new UserDaoImpl();

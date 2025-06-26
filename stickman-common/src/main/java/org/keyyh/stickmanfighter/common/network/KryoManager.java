@@ -18,7 +18,6 @@ public class KryoManager {
     public static void register(Kryo kryo) {
         kryo.setRegistrationRequired(false);
 
-        // Đăng ký tường minh
         kryo.register(InputPacket.class, new InputPacketSerializer());
         kryo.register(CharacterState.class);
         kryo.register(Pose.class);
@@ -26,12 +25,10 @@ public class KryoManager {
         kryo.register(ConnectionResponsePacket.class);
         kryo.register(GameStatePacket.class, new GameStatePacketSerializer());
 
-        // Enums
         kryo.register(PlayerAction.class);
         kryo.register(ActionModifier.class);
         kryo.register(CharacterFSMState.class);
 
-        // Collections & Geometry
         kryo.register(ArrayList.class);
         kryo.register(HashSet.class);
         kryo.register(Line2D.Double.class, new Line2DSerializer());
@@ -39,7 +36,6 @@ public class KryoManager {
         kryo.register(Area.class);
         kryo.register(Ellipse2D.Double.class);
 
-        // Gói tin Matchmaking
         kryo.register(FindMatchRequest.class);
     }
 }

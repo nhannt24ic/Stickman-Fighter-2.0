@@ -117,7 +117,6 @@ public class StickmanCharacterServer {
         if (this.health < 0) {
             this.health = 0;
         }
-        // TODO: Chuyển sang trạng thái HIT_STUN khi bị đánh
         System.out.printf("Player %s took %.1f damage, remaining health: %.1f%n", this.id, damage, this.health);
     }
 

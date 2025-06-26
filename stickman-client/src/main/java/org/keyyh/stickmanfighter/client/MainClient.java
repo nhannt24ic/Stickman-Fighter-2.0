@@ -47,25 +47,23 @@ public class MainClient implements NetworkClient.PacketListener {
             frame.setLocationRelativeTo(null);
             frame.setVisible(true);
 
-            showScreen("LOBBY"); // Bắt đầu ở màn hình Lobby
+            showScreen("LOBBY");
         });
     }
 
     public void showScreen(String screenName) {
         cardLayout.show(mainPanel, screenName);
 
-        // Kích hoạt listener cho màn hình mới và vô hiệu hóa listener của màn hình cũ
         if ("GAME".equals(screenName)) {
-            lobbyScreen.onBecameHidden(); // Lobby ngừng lắng nghe
+            lobbyScreen.onBecameHidden();
             gameScreen.requestFocusInWindow();
-        } else { // LOBBY
-            gameScreen.stopGame(); // Game ngừng lắng nghe và dọn dẹp
-            lobbyScreen.onBecameVisible(); // Lobby bắt đầu lắng nghe
+        } else { 
+            gameScreen.stopGame(); 
+            lobbyScreen.onBecameVisible(); 
             lobbyScreen.requestFocusInWindow();
         }
     }
 
-    // <<< THAY ĐỔI: Hàm received của MainClient giờ chỉ xử lý gói tin báo bắt đầu game
     @Override
     public void received(Object packet) {
         if (packet instanceof ConnectionResponsePacket) {
@@ -73,12 +71,10 @@ public class MainClient implements NetworkClient.PacketListener {
                 ConnectionResponsePacket response = (ConnectionResponsePacket) packet;
                 System.out.println("Match found signal received! My ID is: " + response.yourPlayerId);
 
-                // Tính toán clock offset
                 long clientTime = System.currentTimeMillis();
                 long serverTime = response.initialGameState.timestamp;
                 long clockOffset = clientTime - serverTime;
 
-                // Khởi tạo và chuyển sang màn hình chơi game
                 gameScreen.startGame(response.initialGameState, response.yourPlayerId, clockOffset);
                 showScreen("GAME");
             });
@@ -86,31 +82,23 @@ public class MainClient implements NetworkClient.PacketListener {
     }
 
     public static void main(String[] args) {
-        // Luôn khởi tạo giao diện Swing trên Event Dispatch Thread (EDT)
         SwingUtilities.invokeLater(() -> {
             NetworkService networkService = new NetworkService();
             try {
-                // Cố gắng kết nối đến server trước khi hiển thị giao diện
                 networkService.connect("localhost", 7070);
 
-                // Nếu kết nối thành công, hiển thị cửa sổ đăng nhập
                 LoginView loginView = new LoginView(networkService);
                 loginView.setVisible(true);
 
-                // Thêm một shutdown hook để đảm bảo ngắt kết nối khi app tắt
                 Runtime.getRuntime().addShutdownHook(new Thread(networkService::disconnect));
 
             } catch (IOException e) {
-                // Nếu kết nối thất bại, hiển thị thông báo lỗi và thoát
                 JOptionPane.showMessageDialog(null,
                         "Không thể kết nối đến máy chủ game.\nHãy chắc chắn rằng server đang chạy.",
                         "Lỗi Kết Nối",
                         JOptionPane.ERROR_MESSAGE);
-                System.exit(1); // Thoát ứng dụng
+                System.exit(1);
             }
         });
-
-//        new MainClient();
-
     }
 }
